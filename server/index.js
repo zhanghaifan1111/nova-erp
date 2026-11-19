@@ -137,4 +137,15 @@ import fs from 'node:fs'
 
 app.listen(PORT, () => {
   console.log(`Nova ERP API 已启动: http://localhost:${PORT}`)
+
+  // Render 免费版 15 分钟无请求会休眠。Render 自动注入 RENDER_EXTERNAL_URL，
+  // 用它定时自我访问，保持服务常驻、避免临时文件系统被重置。
+  const publicUrl = process.env.RENDER_EXTERNAL_URL
+  if (publicUrl) {
+    const keepAlive = () => {
+      fetch(`${publicUrl}/api/health`).catch(() => {})
+    }
+    setInterval(keepAlive, 10 * 60 * 1000)
+    console.log('Render 保活已启用:', publicUrl)
+  }
 })
