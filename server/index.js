@@ -135,17 +135,23 @@ app.get('*', (req, res) => {
 
 import fs from 'node:fs'
 
-app.listen(PORT, () => {
-  console.log(`Nova ERP API 已启动: http://localhost:${PORT}`)
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Nova ERP API 已启动: http://0.0.0.0:${PORT}`)
 
-  // Render 免费版 15 分钟无请求会休眠。Render 自动注入 RENDER_EXTERNAL_URL，
-  // 用它定时自我访问，保持服务常驻、避免临时文件系统被重置。
-  const publicUrl = process.env.RENDER_EXTERNAL_URL
+  // Render 免费版 15 分钟无请求会休眠。用外部公网地址定时自我访问，
+  // 保持服务常驻、避免临时文件系统被重置。用 https 公网域名，兼容内部/外部注入。
+  let publicUrl = process.env.RENDER_EXTERNAL_URL || ''
+  if (publicUrl) publicUrl = publicUrl.replace(/^http:\/\//, 'https://')
   if (publicUrl) {
     const keepAlive = () => {
-      fetch(`${publicUrl}/api/health`).catch(() => {})
+      try { fetch(`${publicUrl}/api/health`).catch(() => {}) } catch { /* 忽略，保活失败不影响主服务 */ }
     }
+    setTimeout(keepAlive, 3000) // 启动后先 ping 一次
     setInterval(keepAlive, 10 * 60 * 1000)
     console.log('Render 保活已启用:', publicUrl)
   }
 })
+
+// 未捕获异常不要让进程静默退出（免费实例重启代价高）
+process.on('uncaughtException', (err) => console.error('uncaughtException:', err))
+process.on('unhandledRejection', (err) => console.error('unhandledRejection:', err))
