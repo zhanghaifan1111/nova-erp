@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: nova-erp
+    env: node
+    region: singapore
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health

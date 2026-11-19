@@ -1,0 +1,83 @@
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; padding: 0; height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+/* 品牌区 */
+.brand {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.brand-logo {
+  width: 36px; height: 36px; flex-shrink: 0;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #4f6ef7, #7c5cff);
+  color: #fff; font-weight: 800; font-size: 20px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 12px rgba(79,110,247,.4);
+}
+.brand-text { overflow: hidden; }
+.brand-name { color: #fff; font-size: 17px; font-weight: 700; letter-spacing: .5px; white-space: nowrap; }
+.brand-sub { color: rgba(255,255,255,.45); font-size: 11px; margin-top: 2px; white-space: nowrap; }
+.sider-footer { position: absolute; bottom: 16px; left: 12px; right: 12px; }
+.sider-tip-card {
+  background: linear-gradient(135deg, rgba(79,110,247,.18), rgba(124,92,255,.12));
+  border: 1px solid rgba(124,138,255,.25);
+  border-radius: 10px; padding: 12px 14px;
+}
+.sider-tip-title { color: #a9b6ff; font-size: 13px; font-weight: 700; }
+.sider-tip-desc { color: rgba(255,255,255,.5); font-size: 11px; margin-top: 4px; line-height: 1.5; }
+
+/* 顶栏 */
+.app-header {
+  height: 64px; padding: 0 20px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid rgba(127,127,127,.12);
+  position: sticky; top: 0; z-index: 10;
+}
+.header-left, .header-right { display: flex; align-items: center; gap: 6px; }
+.header-title { font-size: 16px; font-weight: 600; margin-left: 6px; }
+.avatar-wrap { display: flex; align-items: center; gap: 8px; margin-left: 8px; padding-left: 12px; border-left: 1px solid rgba(127,127,127,.15); }
+.avatar-name { font-size: 13px; font-weight: 500; }
+
+/* 内容区 */
+.app-content { padding: 24px; min-height: calc(100vh - 64px); }
+
+/* 页面通用 */
+.page-header { margin-bottom: 20px; }
+.page-title { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
+.page-desc { color: rgba(127,127,127,.85); font-size: 13px; margin: 0; }
+
+/* KPI 卡片 */
+.kpi-card { border-radius: 12px; height: 100%; position: relative; overflow: hidden; }
+.kpi-card .kpi-icon {
+  width: 46px; height: 46px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; margin-bottom: 14px;
+}
+.kpi-label { font-size: 13px; color: rgba(127,127,127,.9); }
+.kpi-value { font-size: 28px; font-weight: 700; line-height: 1.2; margin: 6px 0 2px; }
+.kpi-foot { font-size: 12px; color: rgba(127,127,127,.75); }
+.kpi-trend-up { color: #16b364; font-weight: 600; }
+.kpi-trend-down { color: #f04438; font-weight: 600; }
+
+.chart-card { border-radius: 12px; }
+.stat-panel { border-radius: 12px; height: 100%; }
+
+/* 表格工具条 */
+.table-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.table-toolbar-left { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* 数字强调 */
+.num-strong { font-weight: 600; font-variant-numeric: tabular-nums; }
+.text-right { text-align: right; }
+
+@media (max-width: 768px) {
+  .app-content { padding: 14px; }
+  .header-title { display: none; }
+}

@@ -1,0 +1,12 @@
+# 依赖与构建产物（Render 会现场安装和构建）
+node_modules/
+dist/
+
+# 运行时生成的数据文件
+data/db.json
+
+# 日志与系统文件
+*.log
+.DS_Store
+.env
+.env.local
