@@ -33,6 +33,13 @@ async function seedUsers() {
 }
 await seedUsers()
 
+// ---------- 清空演示数据（管理员专用，一次性） ----------
+app.post('/api/admin/clear-business-data', authRequired, adminRequired, async (req, res) => {
+  const counts = await store.clearBusinessData()
+  console.log('业务数据已清空:', JSON.stringify(counts))
+  res.json({ code: 200, message: '业务数据已清空', data: counts })
+})
+
 // ---------- 鉴权中间件 ----------
 function signToken(user) {
   return jwt.sign({ id: user.id, username: user.username, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: '7d' })

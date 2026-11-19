@@ -67,7 +67,6 @@ export default function Login() {
         <Button type="primary" size="large" block loading={loading} onClick={submit} className="login-btn">
           登 录
         </Button>
-        <div className="login-footer">默认管理员账号：admin / admin123（首次登录后请修改密码）</div>
       </div>
     </div>
   )
