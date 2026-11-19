@@ -1,22 +1,160 @@
 import express from 'express'
 import cors from 'cors'
 import path from 'node:path'
+import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import bcrypt from 'bcryptjs'
+import jwt from 'jsonwebtoken'
 import * as store from './store.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
 const PORT = process.env.PORT || 3001
+const JWT_SECRET = process.env.JWT_SECRET || 'nova-erp-change-this-secret-in-production'
 
 app.use(cors())
 app.use(express.json({ limit: '2mb' }))
 
-// ---------- 通用 CRUD 工厂 ----------
+await store.initStore()
+
+// ---------- 初始化默认账号 ----------
+async function seedUsers() {
+  const users = await store.all('users')
+  if (users.some((u) => u.username === 'admin')) return
+  await store.create('users', {
+    username: 'admin',
+    passwordHash: bcrypt.hashSync('admin123', 10),
+    name: '系统管理员',
+    role: 'admin',
+    customerId: null,
+    status: '启用',
+  })
+  console.log('已创建默认管理员账号: admin / admin123')
+}
+await seedUsers()
+
+// ---------- 鉴权中间件 ----------
+function signToken(user) {
+  return jwt.sign({ id: user.id, username: user.username, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: '7d' })
+}
+
+function authRequired(req, res, next) {
+  const header = req.headers.authorization || ''
+  const token = header.startsWith('Bearer ') ? header.slice(7) : ''
+  if (!token) return res.status(401).json({ code: 401, message: '请先登录' })
+  try {
+    req.user = jwt.verify(token, JWT_SECRET)
+    next()
+  } catch {
+    return res.status(401).json({ code: 401, message: '登录已过期，请重新登录' })
+  }
+}
+
+function adminRequired(req, res, next) {
+  if (req.user?.role !== 'admin') return res.status(403).json({ code: 403, message: '需要管理员权限' })
+  next()
+}
+
+function publicUser(u) {
+  const { passwordHash, ...rest } = u
+  return rest
+}
+
+// ---------- 认证 API ----------
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body || {}
+  const user = await store.findBy('users', 'username', String(username || '').trim())
+  if (!user || !bcrypt.compareSync(String(password || ''), user.passwordHash)) {
+    return res.status(401).json({ code: 401, message: '账号或密码错误' })
+  }
+  if (user.status !== '启用') return res.status(403).json({ code: 403, message: '账号已被停用' })
+  res.json({ code: 200, data: { token: signToken(user), user: publicUser(user) } })
+})
+
+app.get('/api/auth/me', authRequired, async (req, res) => {
+  const user = await store.find('users', req.user.id)
+  if (!user) return res.status(401).json({ code: 401, message: '账号不存在' })
+  res.json({ code: 200, data: publicUser(user) })
+})
+
+app.post('/api/auth/change-password', authRequired, async (req, res) => {
+  const { oldPassword, newPassword } = req.body || {}
+  const user = await store.find('users', req.user.id)
+  if (!user || !bcrypt.compareSync(String(oldPassword || ''), user.passwordHash)) {
+    return res.status(400).json({ code: 400, message: '原密码错误' })
+  }
+  if (!newPassword || String(newPassword).length < 6) {
+    return res.status(400).json({ code: 400, message: '新密码至少 6 位' })
+  }
+  await store.update('users', user.id, { passwordHash: bcrypt.hashSync(String(newPassword), 10) })
+  res.json({ code: 200, message: '密码修改成功' })
+})
+
+// ---------- 用户/账号管理 API（管理员） ----------
+app.get('/api/users', authRequired, adminRequired, async (req, res) => {
+  const rows = await store.all('users')
+  res.json({ code: 200, data: rows.map(publicUser), total: rows.length })
+})
+
+app.post('/api/users', authRequired, adminRequired, async (req, res) => {
+  const { username, password, name, role, customerId, status } = req.body || {}
+  if (!username || !password) return res.status(400).json({ code: 400, message: '账号和密码必填' })
+  if (await store.findBy('users', 'username', String(username).trim())) {
+    return res.status(400).json({ code: 400, message: '账号已存在' })
+  }
+  const rec = await store.create('users', {
+    username: String(username).trim(),
+    passwordHash: bcrypt.hashSync(String(password), 10),
+    name: name || username,
+    role: role === 'customer' ? 'customer' : 'admin',
+    customerId: role === 'customer' ? (customerId || null) : null,
+    status: status || '启用',
+  })
+  res.json({ code: 200, data: publicUser(rec), message: '账号创建成功' })
+})
+
+app.put('/api/users/:id', authRequired, adminRequired, async (req, res) => {
+  const { name, role, customerId, status, password } = req.body || {}
+  const patch = {}
+  if (name !== undefined) patch.name = name
+  if (role !== undefined) patch.role = role === 'customer' ? 'customer' : 'admin'
+  if (customerId !== undefined) patch.customerId = patch.role === 'customer' ? customerId : null
+  if (status !== undefined) patch.status = status
+  if (password) patch.passwordHash = bcrypt.hashSync(String(password), 10)
+  const rec = await store.update('users', req.params.id, patch)
+  rec ? res.json({ code: 200, data: publicUser(rec), message: '更新成功' })
+      : res.status(404).json({ code: 404, message: '账号不存在' })
+})
+
+app.delete('/api/users/:id', authRequired, adminRequired, async (req, res) => {
+  const ok = await store.remove('users', req.params.id)
+  ok ? res.json({ code: 200, message: '删除成功' }) : res.status(404).json({ code: 404, message: '账号不存在' })
+})
+
+// ---------- 客户账号专用：绑定客户档案 ----------
+app.get('/api/customer-accounts', authRequired, adminRequired, async (req, res) => {
+  const [users, customers] = await Promise.all([store.all('users'), store.all('customers')])
+  const custMap = Object.fromEntries(customers.map((c) => [c.id, c]))
+  const rows = users.filter((u) => u.role === 'customer').map((u) => ({
+    ...publicUser(u),
+    customer: custMap[u.customerId] || null,
+  }))
+  res.json({ code: 200, data: rows, total: rows.length })
+})
+
+// ---------- 通用 CRUD（鉴权 + 客户只读且仅看自己） ----------
 const COLLECTIONS = ['products', 'customers', 'suppliers', 'salesOrders', 'purchaseOrders', 'stockLogs']
 
+function scopeRows(req, key, rows) {
+  if (req.user?.role === 'admin') return rows
+  if (key === 'salesOrders') return rows.filter((o) => o.customerId === req.user.customerId)
+  if (key === 'customers') return rows.filter((c) => c.id === req.user.customerId)
+  return []
+}
+
 for (const key of COLLECTIONS) {
-  app.get(`/api/${key}`, (req, res) => {
-    let rows = store.all(key)
+  app.get(`/api/${key}`, authRequired, async (req, res) => {
+    let rows = scopeRows(req, key, await store.all(key))
     const { keyword, status, category } = req.query
     if (keyword) {
       const kw = String(keyword).toLowerCase()
@@ -27,42 +165,49 @@ for (const key of COLLECTIONS) {
     res.json({ code: 200, data: rows, total: rows.length })
   })
 
-  app.get(`/api/${key}/:id`, (req, res) => {
-    const row = store.find(key, req.params.id)
-    row ? res.json({ code: 200, data: row }) : res.status(404).json({ code: 404, message: '记录不存在' })
+  app.get(`/api/${key}/:id`, authRequired, async (req, res) => {
+    const row = await store.find(key, req.params.id)
+    const allowed = scopeRows(req, key, row ? [row] : []).length > 0
+    row && allowed ? res.json({ code: 200, data: row }) : res.status(404).json({ code: 404, message: '记录不存在' })
   })
 
-  app.post(`/api/${key}`, (req, res) => {
-    const rec = store.create(key, req.body)
+  const writeGuard = (req, res, next) => req.user?.role === 'admin'
+    ? next()
+    : res.status(403).json({ code: 403, message: '客户账号为只读权限' })
+
+  app.post(`/api/${key}`, authRequired, writeGuard, async (req, res) => {
+    const rec = await store.create(key, req.body)
     res.json({ code: 200, data: rec, message: '创建成功' })
   })
 
-  app.put(`/api/${key}/:id`, (req, res) => {
-    const rec = store.update(key, req.params.id, req.body)
+  app.put(`/api/${key}/:id`, authRequired, writeGuard, async (req, res) => {
+    const rec = await store.update(key, req.params.id, req.body)
     rec ? res.json({ code: 200, data: rec, message: '更新成功' }) : res.status(404).json({ code: 404, message: '记录不存在' })
   })
 
-  app.delete(`/api/${key}/:id`, (req, res) => {
-    store.remove(key, req.params.id)
-      ? res.json({ code: 200, message: '删除成功' })
-      : res.status(404).json({ code: 404, message: '记录不存在' })
+  app.delete(`/api/${key}/:id`, authRequired, writeGuard, async (req, res) => {
+    const ok = await store.remove(key, req.params.id)
+    ok ? res.json({ code: 200, message: '删除成功' }) : res.status(404).json({ code: 404, message: '记录不存在' })
   })
 }
 
-// ---------- 仪表盘统计 ----------
-app.get('/api/dashboard', (req, res) => {
-  const products = store.all('products')
-  const sales = store.all('salesOrders')
-  const purchases = store.all('purchaseOrders')
-  const customers = store.all('customers')
+// ---------- 仪表盘（客户只看自己数据） ----------
+app.get('/api/dashboard', authRequired, async (req, res) => {
+  let products = await store.all('products')
+  let sales = await store.all('salesOrders')
+  const purchases = await store.all('purchaseOrders')
+  const customers = await store.all('customers')
+  const isCustomer = req.user?.role === 'customer'
+  if (isCustomer) {
+    sales = sales.filter((o) => o.customerId === req.user.customerId)
+  }
 
   const validSales = sales.filter((o) => o.status !== '已取消')
   const revenue = validSales.reduce((s, o) => s + o.total, 0)
-  const purchaseAmount = purchases.filter((o) => o.status !== '已取消').reduce((s, o) => s + o.total, 0)
+  const purchaseAmount = isCustomer ? 0 : purchases.filter((o) => o.status !== '已取消').reduce((s, o) => s + o.total, 0)
   const stockValue = products.reduce((s, p) => s + p.costPrice * p.stock, 0)
   const lowStock = products.filter((p) => p.stock <= p.safeStock)
 
-  // 近 12 个月销售趋势
   const monthKeys = []
   const now = new Date()
   for (let i = 11; i >= 0; i--) {
@@ -71,19 +216,13 @@ app.get('/api/dashboard', (req, res) => {
   }
   const trend = monthKeys.map((m) => {
     const inMonth = validSales.filter((o) => (o.orderDate || '').startsWith(m))
-    return {
-      month: m,
-      revenue: Math.round(inMonth.reduce((s, o) => s + o.total, 0)),
-      orders: inMonth.length,
-    }
+    return { month: m, revenue: Math.round(inMonth.reduce((s, o) => s + o.total, 0)), orders: inMonth.length }
   })
 
-  // 订单状态分布
   const statusMap = {}
   sales.forEach((o) => { statusMap[o.status] = (statusMap[o.status] || 0) + 1 })
   const statusDist = Object.entries(statusMap).map(([name, value]) => ({ name, value }))
 
-  // 分类销售占比
   const catMap = {}
   validSales.forEach((o) => o.items.forEach((it) => {
     const p = products.find((x) => x.id === it.productId)
@@ -92,7 +231,6 @@ app.get('/api/dashboard', (req, res) => {
   }))
   const categoryDist = Object.entries(catMap).map(([name, value]) => ({ name, value: Math.round(value) }))
 
-  // 库存金额 TOP6
   const stockTop = [...products]
     .sort((a, b) => b.costPrice * b.stock - a.costPrice * a.stock)
     .slice(0, 6)
@@ -102,56 +240,41 @@ app.get('/api/dashboard', (req, res) => {
     code: 200,
     data: {
       kpi: {
-        revenue: Math.round(revenue),
-        orders: validSales.length,
-        customers: customers.length,
-        stockValue: Math.round(stockValue),
+        revenue: Math.round(revenue), orders: validSales.length,
+        customers: isCustomer ? 1 : customers.length,
+        stockValue: isCustomer ? 0 : Math.round(stockValue),
         purchaseAmount: Math.round(purchaseAmount),
         profit: Math.round(revenue - purchaseAmount),
-        lowStockCount: lowStock.length,
-        productCount: products.length,
+        lowStockCount: lowStock.length, productCount: products.length,
       },
-      trend,
-      statusDist,
-      categoryDist,
-      stockTop,
+      trend, statusDist, categoryDist, stockTop,
       lowStock: lowStock.slice(0, 6).map((p) => ({ sku: p.sku, name: p.name, stock: p.stock, safeStock: p.safeStock })),
       recentOrders: [...sales].sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || '')).slice(0, 6),
+      isCustomer,
     },
   })
 })
 
-// ---------- 健康检查 ----------
-app.get('/api/health', (req, res) => res.json({ code: 200, message: 'ok', time: new Date().toISOString() }))
+app.get('/api/health', (req, res) => res.json({ code: 200, message: 'ok', db: store.isMongo() ? 'mongodb' : 'file', time: new Date().toISOString() }))
 
 // ---------- 生产环境托管静态文件 ----------
 const distDir = path.join(__dirname, '..', 'dist')
 app.use(express.static(distDir))
 app.get('*', (req, res) => {
   const indexFile = path.join(distDir, 'index.html')
-  if (fs.existsSync(indexFile)) res.sendFile(indexFile)
-  else res.status(404).send('前端未构建，请先执行 npm run build 或使用 npm run dev')
+  fs.existsSync(indexFile) ? res.sendFile(indexFile) : res.status(404).send('前端未构建，请先执行 npm run build')
 })
-
-import fs from 'node:fs'
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Nova ERP API 已启动: http://0.0.0.0:${PORT}`)
-
-  // Render 免费版 15 分钟无请求会休眠。用外部公网地址定时自我访问，
-  // 保持服务常驻、避免临时文件系统被重置。用 https 公网域名，兼容内部/外部注入。
-  let publicUrl = process.env.RENDER_EXTERNAL_URL || ''
-  if (publicUrl) publicUrl = publicUrl.replace(/^http:\/\//, 'https://')
+  const publicUrl = (process.env.RENDER_EXTERNAL_URL || '').replace(/^http:\/\//, 'https://')
   if (publicUrl) {
-    const keepAlive = () => {
-      try { fetch(`${publicUrl}/api/health`).catch(() => {}) } catch { /* 忽略，保活失败不影响主服务 */ }
-    }
-    setTimeout(keepAlive, 3000) // 启动后先 ping 一次
+    const keepAlive = () => { try { fetch(`${publicUrl}/api/health`).catch(() => {}) } catch {} }
+    setTimeout(keepAlive, 3000)
     setInterval(keepAlive, 10 * 60 * 1000)
     console.log('Render 保活已启用:', publicUrl)
   }
 })
 
-// 未捕获异常不要让进程静默退出（免费实例重启代价高）
 process.on('uncaughtException', (err) => console.error('uncaughtException:', err))
 process.on('unhandledRejection', (err) => console.error('unhandledRejection:', err))

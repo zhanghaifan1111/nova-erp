@@ -1,17 +1,44 @@
-// 统一 API 客户端
+// 统一 API 客户端（自动携带登录令牌）
 const BASE = '/api'
+
+function getToken() { return localStorage.getItem('nova-token') || '' }
+export function setToken(token: string) { token ? localStorage.setItem('nova-token', token) : localStorage.removeItem('nova-token') }
+
+export class ApiError extends Error {
+  code: number
+  constructor(code: number, message: string) { super(message); this.code = code }
+}
 
 async function request<T = any>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: getToken() ? `Bearer ${getToken()}` : '',
+      ...(options?.headers || {}),
+    },
   })
-  const json = await res.json()
-  if (json.code !== 200) throw new Error(json.message || '请求失败')
+  let json: any
+  try { json = await res.json() } catch { throw new ApiError(res.status, '服务器返回异常') }
+  if (json.code !== 200) {
+    if (json.code === 401) { setToken(''); window.dispatchEvent(new Event('nova-unauthorized')) }
+    throw new ApiError(json.code, json.message || '请求失败')
+  }
   return json as T
 }
 
 export const api = {
+  login: (username: string, password: string) =>
+    request<{ code: number; data: { token: string; user: any } }>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  me: () => request<{ code: number; data: any }>('/auth/me'),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    request('/auth/change-password', { method: 'POST', body: JSON.stringify({ oldPassword, newPassword }) }),
+  listUsers: () => request<{ code: number; data: any[] }>('/users'),
+  createUser: (body: any) => request('/users', { method: 'POST', body: JSON.stringify(body) }),
+  updateUser: (id: string, body: any) => request(`/users/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  removeUser: (id: string) => request(`/users/${id}`, { method: 'DELETE' }),
+  listCustomerAccounts: () => request<{ code: number; data: any[] }>('/customer-accounts'),
+
   list: (key: string, params?: Record<string, any>) => {
     const qs = params ? '?' + new URLSearchParams(params as any).toString() : ''
     return request<{ code: number; data: any[]; total: number }>(`/${key}${qs}`)
