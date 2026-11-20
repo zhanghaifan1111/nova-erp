@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Nova ERP - 企业级进销存管理系统",
+  "description": "周桂祥的ERP - 企业级进销存管理系统",
   "engines": {
     "node": ">=20"
   },

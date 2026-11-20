@@ -480,7 +480,7 @@ app.get('*', (req, res) => {
 })
 
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Nova ERP API 已启动: http://0.0.0.0:${PORT}`)
+  console.log(`周桂祥的ERP API 已启动: http://0.0.0.0:${PORT}`)
   const publicUrl = (process.env.RENDER_EXTERNAL_URL || '').replace(/^http:\/\//, 'https://')
   if (publicUrl) {
     const keepAlive = () => { try { fetch(`${publicUrl}/api/health`).catch(() => {}) } catch {} }

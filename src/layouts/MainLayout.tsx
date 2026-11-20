@@ -104,7 +104,7 @@ export default function MainLayout() {
   const { user, logout, isAdmin } = useAuth()
 
   const menuItems = isAdmin ? adminMenu : customerMenu
-  const title = titleMap[location.pathname] || (location.pathname === '/profile' ? '账号设置' : 'Nova ERP')
+  const title = titleMap[location.pathname] || (location.pathname === '/profile' ? '账号设置' : '周桂祥的ERP')
 
   useEffect(() => {
     const g = groupKeys[location.pathname]
@@ -126,10 +126,10 @@ export default function MainLayout() {
     <Layout style={{ minHeight: '100vh' }}>
       <Sider trigger={null} collapsible collapsed={collapsed} width={236} style={{ position: 'fixed', left: 0, top: 0, bottom: 0, zIndex: 20 }}>
         <div className="brand">
-          <div className="brand-logo">N</div>
+          <div className="brand-logo">周</div>
           {!collapsed && (
             <div className="brand-text">
-              <div className="brand-name">Nova ERP</div>
+              <div className="brand-name">周桂祥的ERP</div>
               <div className="brand-sub">智能企业管理平台</div>
             </div>
           )}

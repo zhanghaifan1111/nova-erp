@@ -27,9 +27,9 @@ export default function Login() {
       <div className="login-bg-shape shape2" />
       <div className="login-box">
         <div className="login-brand">
-          <div className="login-logo">N</div>
+          <div className="login-logo">周</div>
           <div>
-            <div className="login-title">Nova ERP</div>
+            <div className="login-title">周桂祥的ERP</div>
             <div className="login-subtitle">智能企业管理平台</div>
           </div>
         </div>
