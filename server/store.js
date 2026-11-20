@@ -20,11 +20,13 @@ const today = () => new Date().toISOString().slice(0, 10)
 export const COLLECTIONS = [
   'products', 'customers', 'suppliers', 'salesOrders', 'purchaseOrders', 'stockLogs',
   'shops', 'warehouses', 'shippingMethods', 'shippingTemplates', 'stockTransfers', 'shipments',
+  'sourcedProducts', 'listings', 'syncConfigs', 'syncLogs', 'platformOrders', 'messages', 'replyTemplates',
   'users',
 ]
 const BUSINESS_COLLECTIONS = [
   'products', 'customers', 'suppliers', 'salesOrders', 'purchaseOrders', 'stockLogs',
   'shops', 'warehouses', 'shippingMethods', 'shippingTemplates', 'stockTransfers', 'shipments',
+  'sourcedProducts', 'listings', 'syncConfigs', 'syncLogs', 'platformOrders', 'messages', 'replyTemplates',
 ]
 
 function emptyDb() {

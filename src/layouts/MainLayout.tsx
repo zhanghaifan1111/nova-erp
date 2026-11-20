@@ -20,6 +20,8 @@ const adminMenu = [
     key: 'grp-product', icon: <AppstoreOutlined />, label: '商品与库存',
     children: [
       { key: '/products', label: '商品管理' },
+      { key: '/sourcing', label: '商品采集箱' },
+      { key: '/listings', label: '刊登管理' },
       { key: '/inventory', label: '库存管理' },
       { key: '/warehouses', label: '仓库管理' },
       { key: '/stock-transfers', label: '库存调拨' },
@@ -31,6 +33,7 @@ const adminMenu = [
       { key: '/sales', label: '销售订单' },
       { key: '/purchase', label: '采购订单' },
       { key: '/shipments', label: '打单发货' },
+      { key: '/order-sync', label: '多平台订单同步' },
     ],
   },
   {
@@ -39,6 +42,7 @@ const adminMenu = [
       { key: '/shops', label: '店铺管理' },
       { key: '/shipping-methods', label: '物流渠道' },
       { key: '/shipping-templates', label: '运费模板' },
+      { key: '/messages', label: '客户消息聚合' },
     ],
   },
   {
@@ -77,12 +81,15 @@ const titleMap: Record<string, string> = {
   '/shops': '店铺管理', '/warehouses': '仓库管理', '/shipping-methods': '物流渠道',
   '/shipping-templates': '运费模板', '/stock-transfers': '库存调拨',
   '/shipments': '打单发货', '/profit': '利润核算', '/pricing': '定价计算器',
+  '/sourcing': '商品采集箱', '/listings': '刊登管理',
+  '/order-sync': '多平台订单同步', '/messages': '客户消息聚合',
 }
 
 const groupKeys: Record<string, string> = {
-  '/products': 'grp-product', '/inventory': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product',
-  '/sales': 'grp-order', '/purchase': 'grp-order', '/shipments': 'grp-order',
-  '/shops': 'grp-cross', '/shipping-methods': 'grp-cross', '/shipping-templates': 'grp-cross',
+  '/products': 'grp-product', '/sourcing': 'grp-product', '/listings': 'grp-product',
+  '/inventory': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product',
+  '/sales': 'grp-order', '/purchase': 'grp-order', '/shipments': 'grp-order', '/order-sync': 'grp-order',
+  '/shops': 'grp-cross', '/shipping-methods': 'grp-cross', '/shipping-templates': 'grp-cross', '/messages': 'grp-cross',
   '/finance': 'grp-finance', '/profit': 'grp-finance', '/pricing': 'grp-finance',
   '/accounts': 'grp-account', '/customer-accounts': 'grp-account', '/profile': 'grp-account',
 }

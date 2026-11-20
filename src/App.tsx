@@ -24,6 +24,10 @@ const StockTransfers = lazy(() => import('./pages/StockTransfers'))
 const Shipments = lazy(() => import('./pages/Shipments'))
 const Profit = lazy(() => import('./pages/Profit'))
 const Pricing = lazy(() => import('./pages/Pricing'))
+const Sourcing = lazy(() => import('./pages/Sourcing'))
+const Listings = lazy(() => import('./pages/Listings'))
+const OrderSync = lazy(() => import('./pages/OrderSync'))
+const Messages = lazy(() => import('./pages/Messages'))
 
 const Loading = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>
@@ -68,6 +72,10 @@ export default function App() {
           <Route path="/shipments" element={<AdminOnly><Shipments /></AdminOnly>} />
           <Route path="/profit" element={<AdminOnly><Profit /></AdminOnly>} />
           <Route path="/pricing" element={<AdminOnly><Pricing /></AdminOnly>} />
+          <Route path="/sourcing" element={<AdminOnly><Sourcing /></AdminOnly>} />
+          <Route path="/listings" element={<AdminOnly><Listings /></AdminOnly>} />
+          <Route path="/order-sync" element={<AdminOnly><OrderSync /></AdminOnly>} />
+          <Route path="/messages" element={<AdminOnly><Messages /></AdminOnly>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

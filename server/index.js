@@ -153,6 +153,7 @@ app.get('/api/customer-accounts', authRequired, adminRequired, async (req, res) 
 const COLLECTIONS = [
   'products', 'customers', 'suppliers', 'salesOrders', 'purchaseOrders', 'stockLogs',
   'shops', 'warehouses', 'shippingMethods', 'shippingTemplates', 'stockTransfers', 'shipments',
+  'sourcedProducts', 'listings', 'syncConfigs', 'syncLogs', 'platformOrders', 'messages', 'replyTemplates',
 ]
 
 function scopeRows(req, key, rows) {
@@ -263,6 +264,140 @@ app.get('/api/dashboard', authRequired, async (req, res) => {
       isCustomer,
     },
   })
+})
+
+// ---------- 商品采集 ----------
+// 把用户提供的真实商品链接/信息采集进采集箱（不生成假商品）
+app.post('/api/sourcing/collect', authRequired, adminRequired, async (req, res) => {
+  const { platform, lines } = req.body || {}
+  if (!Array.isArray(lines) || !lines.length) return res.status(400).json({ code: 400, message: '请提供至少一个商品链接' })
+  let added = 0
+  const existing = await store.all('sourcedProducts')
+  const seen = new Set(existing.map((x) => x.sourceUrl).filter(Boolean))
+  const todayStr = new Date().toISOString().slice(0, 10)
+  for (const line of lines) {
+    const item = typeof line === 'string' ? { url: line } : (line || {})
+    const url = String(item.url || item.sourceUrl || '').trim()
+    if (!url || seen.has(url)) continue
+    seen.add(url)
+    await store.create('sourcedProducts', {
+      platform: platform || item.platform || '未知平台',
+      sourceUrl: url,
+      title: item.title || url.split('/').pop()?.slice(0, 60) || url,
+      sourcePrice: Number(item.price || 0),
+      image: item.image || '',
+      status: '待刊登',
+      collectedAt: todayStr,
+    })
+    added++
+  }
+  res.json({ code: 200, message: `采集完成，新增 ${added} 条`, data: { added } })
+})
+
+// ---------- 刊登 ----------
+app.post('/api/listings/publish', authRequired, adminRequired, async (req, res) => {
+  const { sourcedProductId, shopId, title, price, sku } = req.body || {}
+  const src = await store.find('sourcedProducts', sourcedProductId)
+  if (!src) return res.status(404).json({ code: 404, message: '采集商品不存在' })
+  const shop = await store.find('shops', shopId)
+  if (!shop) return res.status(404).json({ code: 404, message: '请选择有效店铺' })
+  const listing = await store.create('listings', {
+    sourcedProductId,
+    sourceUrl: src.sourceUrl,
+    shopId,
+    shopName: shop.name,
+    platform: shop.platform,
+    title: title || src.title,
+    sku: sku || '',
+    price: Number(price || src.sourcePrice || 0),
+    image: src.image || '',
+    platformProductId: '',
+    status: '已刊登',
+    publishedAt: new Date().toISOString().slice(0, 10),
+  })
+  await store.update('sourcedProducts', sourcedProductId, { status: '已刊登' })
+  res.json({ code: 200, message: '刊登成功', data: listing })
+})
+
+// ---------- 平台订单同步（真实数据导入，不生成假数据） ----------
+app.post('/api/sync/import', authRequired, adminRequired, async (req, res) => {
+  const { shopId, rows } = req.body || {}
+  if (!Array.isArray(rows) || !rows.length) return res.status(400).json({ code: 400, message: '请提供订单数据' })
+  const shop = await store.find('shops', shopId)
+  const existing = await store.all('platformOrders')
+  const seen = new Set(existing.map((o) => o.platformOrderNo).filter(Boolean))
+  let added = 0, skipped = 0
+  for (const row of rows) {
+    const no = String(row.platformOrderNo || row.orderNo || '').trim()
+    if (!no || seen.has(no)) { skipped++; continue }
+    seen.add(no)
+    await store.create('platformOrders', {
+      platformOrderNo: no,
+      platform: shop?.platform || row.platform || '未知平台',
+      shopId: shopId || '',
+      shopName: shop?.name || row.shopName || '',
+      customerName: row.customerName || '',
+      amount: Number(row.amount || 0),
+      currency: row.currency || 'CNY',
+      orderTime: row.orderTime || new Date().toISOString().slice(0, 10),
+      itemSummary: row.itemSummary || '',
+      status: '待同步',
+      salesOrderId: '',
+    })
+    added++
+  }
+  await store.create('syncLogs', {
+    shopId: shopId || '', shopName: shop?.name || '手动导入',
+    type: '导入订单', total: rows.length, added, skipped,
+    result: `新增 ${added}，跳过 ${skipped}`,
+    syncedAt: new Date().toISOString().slice(0, 10),
+  })
+  res.json({ code: 200, message: `导入完成：新增 ${added}，跳过 ${skipped}`, data: { added, skipped } })
+})
+
+// 平台订单一键转销售订单
+app.post('/api/sync/to-sales/:id', authRequired, adminRequired, async (req, res) => {
+  const po = await store.find('platformOrders', req.params.id)
+  if (!po) return res.status(404).json({ code: 404, message: '平台订单不存在' })
+  if (po.status === '已同步') return res.status(400).json({ code: 400, message: '该订单已同步过' })
+  // 客户：优先复用同名客户，否则新建
+  let customer = (await store.all('customers')).find((c) => c.name === po.customerName)
+  if (!customer && po.customerName) {
+    customer = await store.create('customers', {
+      code: 'CUS-' + Date.now().toString().slice(-6),
+      name: po.customerName, contact: '', phone: '', email: '',
+      address: '', level: '普通', status: '正常',
+    })
+  }
+  const items = [{
+    productId: '', sku: '', name: po.itemSummary || '平台订单商品（待补充）',
+    qty: 1, price: Number(po.amount || 0),
+  }]
+  const sales = await store.all('salesOrders')
+  const year = new Date().getFullYear()
+  const seq = sales.length + 1
+  const so = await store.create('salesOrders', {
+    orderNo: 'SO' + year + String(seq).padStart(5, '0'),
+    customerId: customer?.id || '', customerName: po.customerName || '平台客户',
+    shopId: po.shopId || '', shopName: po.shopName || '',
+    items, total: Number(po.amount || 0), status: '待发货',
+    orderDate: po.orderTime || new Date().toISOString().slice(0, 10),
+    platformOrderNo: po.platformOrderNo, shippingFee: 0, otherFee: 0,
+  })
+  await store.update('platformOrders', po.id, { status: '已同步', salesOrderId: so.id })
+  res.json({ code: 200, message: '已转为销售订单', data: so })
+})
+
+// ---------- 客户消息回复 ----------
+app.post('/api/messages/:id/reply', authRequired, async (req, res) => {
+  const { content } = req.body || {}
+  if (!content || !String(content).trim()) return res.status(400).json({ code: 400, message: '回复内容不能为空' })
+  const msg = await store.find('messages', req.params.id)
+  if (!msg) return res.status(404).json({ code: 404, message: '消息不存在' })
+  const replies = Array.isArray(msg.replies) ? msg.replies : []
+  replies.push({ content: String(content).trim(), at: new Date().toISOString(), by: req.user?.name || req.user?.username || '系统' })
+  const rec = await store.update('messages', msg.id, { status: '已回复', replies, repliedAt: new Date().toISOString().slice(0, 10) })
+  res.json({ code: 200, message: '回复成功', data: rec })
 })
 
 // ---------- 利润核算 ----------

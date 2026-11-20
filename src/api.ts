@@ -50,6 +50,11 @@ export const api = {
   dashboard: () => request('/dashboard'),
   profit: () => request<{ code: number; data: { rows: any[]; sum: any } }>('/profit'),
   pricing: (body: any) => request('/pricing', { method: 'POST', body: JSON.stringify(body) }),
+  collect: (body: any) => request('/sourcing/collect', { method: 'POST', body: JSON.stringify(body) }),
+  publish: (body: any) => request('/listings/publish', { method: 'POST', body: JSON.stringify(body) }),
+  syncImport: (body: any) => request('/sync/import', { method: 'POST', body: JSON.stringify(body) }),
+  syncToSales: (id: string) => request(`/sync/to-sales/${id}`, { method: 'POST' }),
+  replyMessage: (id: string, content: string) => request(`/messages/${id}/reply`, { method: 'POST', body: JSON.stringify({ content }) }),
   health: () => request('/health'),
 }
 
