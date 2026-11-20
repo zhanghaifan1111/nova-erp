@@ -60,6 +60,8 @@ export const api = {
   pushRetry: (logId: string) => request('/push/retry/' + logId, { method: 'POST' }),
   pushTest: (endpointId?: string) => request('/push/test', { method: 'POST', body: JSON.stringify({ endpointId }) }),
   pushPreview: (id: string) => request('/push/preview/' + id),
+  genCartons: (orderId: string) => request('/label/cartons/from-order/' + orderId, { method: 'POST' }),
+  genWaybill: (orderId: string) => request('/label/waybills/from-order/' + orderId, { method: 'POST' }),
   health: () => request('/health'),
 }
 

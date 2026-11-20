@@ -156,6 +156,7 @@ const COLLECTIONS = [
   'shops', 'warehouses', 'shippingMethods', 'shippingTemplates', 'stockTransfers', 'shipments',
   'sourcedProducts', 'listings', 'syncConfigs', 'syncLogs', 'platformOrders', 'messages', 'replyTemplates',
   'apiEndpoints', 'pushLogs',
+  'cartons', 'waybills', 'printTemplates',
 ]
 
 function scopeRows(req, key, rows) {
@@ -400,6 +401,72 @@ app.post('/api/messages/:id/reply', authRequired, async (req, res) => {
   replies.push({ content: String(content).trim(), at: new Date().toISOString(), by: req.user?.name || req.user?.username || '系统' })
   const rec = await store.update('messages', msg.id, { status: '已回复', replies, repliedAt: new Date().toISOString().slice(0, 10) })
   res.json({ code: 200, message: '回复成功', data: rec })
+})
+
+// ---------- 箱唛 / 面单生成 ----------
+// 从销售订单生成箱唛（外箱标签）：按订单商品明细，每个 SKU 一箱，自动编号
+app.post('/api/label/cartons/from-order/:id', authRequired, adminRequired, async (req, res) => {
+  const order = await store.find('salesOrders', req.params.id)
+  if (!order) return res.status(404).json({ code: 404, message: '订单不存在' })
+  const products = await store.all('products')
+  const productMap = Object.fromEntries(products.map((p) => [p.id, p]))
+  const cartons = await store.all('cartons')
+  const items = (order.items || []).length ? order.items : [{ name: '订单商品', sku: '', qty: 1 }]
+  const created = []
+  let boxNo = cartons.filter((c) => (c.orderNo || '') === order.orderNo).length
+  for (const it of items) {
+    const qty = Number(it.qty || 1)
+    const cartonNo = `BX-${String(order.orderNo || 'ORD').replace(/\W/g, '')}-${String(boxNo + 1).padStart(2, '0')}`
+    const rec = await store.create('cartons', {
+      cartonNo,
+      orderNo: order.orderNo || '',
+      orderId: order.id,
+      sku: it.sku || productMap[it.productId]?.sku || '',
+      productName: it.name || productMap[it.productId]?.name || '',
+      qty,
+      grossWeight: Number(it.grossWeight || 0),
+      netWeight: Number(it.netWeight || 0),
+      destination: order.shopName || order.customerName || '',
+      trackingNo: order.trackingNo || '',
+      carrier: order.carrier || order.shippingMethod || '',
+      remark: order.remark || '',
+      status: '待打印',
+    })
+    created.push(rec); boxNo++
+  }
+  res.json({ code: 200, message: `已生成 ${created.length} 个箱唛`, data: created })
+})
+
+// 从销售订单生成快递面单（寄件=店铺/仓库，收件=客户）
+app.post('/api/label/waybills/from-order/:id', authRequired, adminRequired, async (req, res) => {
+  const order = await store.find('salesOrders', req.params.id)
+  if (!order) return res.status(404).json({ code: 404, message: '订单不存在' })
+  const [shops, warehouses, customers] = await Promise.all([store.all('shops'), store.all('warehouses'), store.all('customers')])
+  const shop = shops.find((s) => s.id === order.shopId)
+  const warehouse = warehouses.find((w) => w.id === order.warehouseId)
+  const customer = customers.find((c) => c.id === order.customerId)
+  const items = order.items || []
+  const rec = await store.create('waybills', {
+    waybillNo: order.trackingNo || '',
+    orderNo: order.orderNo || '',
+    orderId: order.id,
+    carrier: order.carrier || order.shippingMethod || shop?.platform || '',
+    // 寄件人
+    senderName: warehouse?.name || shop?.name || '发货仓',
+    senderPhone: warehouse?.phone || '',
+    senderAddress: warehouse?.address || '',
+    // 收件人
+    receiverName: order.customerName || customer?.name || '',
+    receiverPhone: order.phone || customer?.phone || '',
+    receiverAddress: order.address || customer?.address || '',
+    itemSummary: items.map((i) => `${i.name || '商品'} x${i.qty || 1}`).join('；'),
+    totalQty: items.reduce((s, i) => s + Number(i.qty || 0), 0),
+    weight: Number(order.weight || 0),
+    cod: Number(order.cod || 0),
+    remark: order.remark || '',
+    status: '待打印',
+  })
+  res.json({ code: 200, message: '面单已生成', data: rec })
 })
 
 // ---------- 订单推送到外部系统（Webhook / open API） ----------
