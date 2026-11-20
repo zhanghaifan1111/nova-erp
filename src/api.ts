@@ -62,6 +62,15 @@ export const api = {
   pushPreview: (id: string) => request('/push/preview/' + id),
   genCartons: (orderId: string) => request('/label/cartons/from-order/' + orderId, { method: 'POST' }),
   genWaybill: (orderId: string) => request('/label/waybills/from-order/' + orderId, { method: 'POST' }),
+  receiptFromPurchase: (id: string) => request('/stock/receipt-from-purchase/' + id, { method: 'POST' }),
+  receiptConfirm: (id: string) => request('/stock/receipt-confirm/' + id, { method: 'POST' }),
+  checkCreate: (body: any) => request('/stock/check-create', { method: 'POST', body: JSON.stringify(body) }),
+  checkUpdate: (id: string, actual: Record<string, number>) => request('/stock/check-update/' + id, { method: 'POST', body: JSON.stringify({ actual }) }),
+  checkConfirm: (id: string) => request('/stock/check-confirm/' + id, { method: 'POST' }),
+  returnFromOrder: (id: string, body?: any) => request('/stock/return-from-order/' + id, { method: 'POST', body: JSON.stringify(body || {}) }),
+  returnConfirm: (id: string) => request('/stock/return-confirm/' + id, { method: 'POST' }),
+  importRows: (key: string, rows: any[]) => request('/import', { method: 'POST', body: JSON.stringify({ key, rows }) }),
+  exportRows: (key: string) => request<{ code: number; data: any[] }>('/export/' + key),
   health: () => request('/health'),
 }
 

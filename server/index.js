@@ -157,6 +157,7 @@ const COLLECTIONS = [
   'sourcedProducts', 'listings', 'syncConfigs', 'syncLogs', 'platformOrders', 'messages', 'replyTemplates',
   'apiEndpoints', 'pushLogs',
   'cartons', 'waybills', 'printTemplates',
+  'receipts', 'stockChecks', 'returns',
 ]
 
 function scopeRows(req, key, rows) {
@@ -401,6 +402,197 @@ app.post('/api/messages/:id/reply', authRequired, async (req, res) => {
   replies.push({ content: String(content).trim(), at: new Date().toISOString(), by: req.user?.name || req.user?.username || '系统' })
   const rec = await store.update('messages', msg.id, { status: '已回复', replies, repliedAt: new Date().toISOString().slice(0, 10) })
   res.json({ code: 200, message: '回复成功', data: rec })
+})
+
+// ---------- 库存联动：调整库存并写流水 ----------
+async function adjustStock(productId, delta, { type, relatedNo, note }) {
+  const product = await store.find('products', productId)
+  if (!product) throw new Error('商品不存在')
+  const newStock = Math.max(0, Number(product.stock || 0) + delta)
+  await store.update('products', productId, { stock: newStock })
+  await store.create('stockLogs', {
+    type, productId, sku: product.sku || '', name: product.name || '',
+    qty: Math.abs(delta), relatedNo: relatedNo || '-', note: note || '',
+  })
+  return newStock
+}
+
+// ---------- 采购入库 ----------
+// 从采购订单生成入库单（明细来自采购订单）
+app.post('/api/stock/receipt-from-purchase/:id', authRequired, adminRequired, async (req, res) => {
+  const po = await store.find('purchaseOrders', req.params.id)
+  if (!po) return res.status(404).json({ code: 404, message: '采购订单不存在' })
+  const products = await store.all('products')
+  const productMap = Object.fromEntries(products.map((p) => [p.id, p]))
+  const items = (po.items || []).length ? po.items : [{ name: '采购商品', sku: '', qty: 1, price: po.total || 0 }]
+  const rec = await store.create('receipts', {
+    receiptNo: 'RK-' + String(po.orderNo || Date.now()).replace(/\W/g, ''),
+    purchaseNo: po.orderNo || '',
+    supplierName: po.supplierName || '',
+    items: items.map((it) => ({
+      productId: it.productId || '', sku: it.sku || productMap[it.productId]?.sku || '',
+      name: it.name || productMap[it.productId]?.name || '',
+      qty: Number(it.qty || 0), price: Number(it.price || 0),
+    })),
+    total: Number(po.total || 0),
+    warehouse: po.warehouse || '',
+    status: '待入库',
+    receivedAt: '',
+  })
+  res.json({ code: 200, message: '入库单已生成', data: rec })
+})
+
+// 确认入库：增加库存 + 写流水 + 采购单标记到货
+app.post('/api/stock/receipt-confirm/:id', authRequired, adminRequired, async (req, res) => {
+  const rec = await store.find('receipts', req.params.id)
+  if (!rec) return res.status(404).json({ code: 404, message: '入库单不存在' })
+  if (rec.status === '已入库') return res.status(400).json({ code: 400, message: '该入库单已确认过' })
+  for (const it of rec.items || []) {
+    const pid = it.productId || (await store.all('products')).find((p) => p.sku === it.sku)?.id
+    if (pid) await adjustStock(pid, Number(it.qty || 0), { type: '入库', relatedNo: rec.receiptNo, note: `采购入库 ${rec.supplierName || ''}` })
+  }
+  await store.update('receipts', rec.id, { status: '已入库', receivedAt: new Date().toISOString().slice(0, 10) })
+  if (rec.purchaseNo) {
+    const pos = await store.all('purchaseOrders')
+    const po = pos.find((p) => p.orderNo === rec.purchaseNo)
+    if (po) await store.update('purchaseOrders', po.id, { status: '已完成' })
+  }
+  res.json({ code: 200, message: '入库确认成功，库存已更新' })
+})
+
+// ---------- 库存盘点 ----------
+// 生成盘点单：以当前商品库存为账面数
+app.post('/api/stock/check-create', authRequired, adminRequired, async (req, res) => {
+  const { items } = req.body || {}
+  if (!Array.isArray(items) || !items.length) return res.status(400).json({ code: 400, message: '请选择要盘点的商品' })
+  const products = await store.all('products')
+  const productMap = Object.fromEntries(products.map((p) => [p.id, p]))
+  const lines = items.map((it) => {
+    const pid = it.productId
+    const p = productMap[pid]
+    const book = p ? Number(p.stock || 0) : 0
+    const actual = Number(it.actual ?? book)
+    return {
+      productId: pid, sku: p?.sku || '', name: p?.name || '',
+      bookQty: book, actualQty: actual, diff: actual - book,
+    }
+  })
+  const rec = await store.create('stockChecks', {
+    checkNo: 'PD-' + Date.now().toString().slice(-8),
+    warehouse: req.body?.warehouse || '',
+    items: lines,
+    diffTotal: lines.reduce((s, l) => s + l.diff, 0),
+    status: '待盘点',
+    checkedAt: '',
+  })
+  res.json({ code: 200, message: '盘点单已生成', data: rec })
+})
+
+// 更新盘点单实盘数（重算差异）
+app.post('/api/stock/check-update/:id', authRequired, adminRequired, async (req, res) => {
+  const rec = await store.find('stockChecks', req.params.id)
+  if (!rec) return res.status(404).json({ code: 404, message: '盘点单不存在' })
+  if (rec.status === '已盘点') return res.status(400).json({ code: 400, message: '已盘点的单据不能修改' })
+  const actualMap = req.body?.actual || {}
+  const items = (rec.items || []).map((it) => {
+    const actual = Number(actualMap[it.productId] ?? it.actualQty ?? it.bookQty)
+    return { ...it, actualQty: actual, diff: actual - Number(it.bookQty || 0) }
+  })
+  const diffTotal = items.reduce((s, l) => s + l.diff, 0)
+  await store.update('stockChecks', rec.id, { items, diffTotal })
+  res.json({ code: 200, message: '实盘数已保存', data: { diffTotal } })
+})
+
+// 确认盘点：按差异调整库存 + 写流水
+app.post('/api/stock/check-confirm/:id', authRequired, adminRequired, async (req, res) => {
+  const rec = await store.find('stockChecks', req.params.id)
+  if (!rec) return res.status(404).json({ code: 404, message: '盘点单不存在' })
+  if (rec.status === '已盘点') return res.status(400).json({ code: 400, message: '该盘点单已确认过' })
+  for (const it of rec.items || []) {
+    if (!it.diff || !it.productId) continue
+    await adjustStock(it.productId, it.diff, { type: it.diff > 0 ? '盘盈' : '盘亏', relatedNo: rec.checkNo, note: `盘点差异 ${it.diff > 0 ? '+' : ''}${it.diff}` })
+  }
+  await store.update('stockChecks', rec.id, { status: '已盘点', checkedAt: new Date().toISOString().slice(0, 10) })
+  res.json({ code: 200, message: '盘点确认成功，库存已按差异调整' })
+})
+
+// ---------- 销售退货 ----------
+// 从销售订单生成退货单
+app.post('/api/stock/return-from-order/:id', authRequired, adminRequired, async (req, res) => {
+  const order = await store.find('salesOrders', req.params.id)
+  if (!order) return res.status(404).json({ code: 404, message: '订单不存在' })
+  const products = await store.all('products')
+  const productMap = Object.fromEntries(products.map((p) => [p.id, p]))
+  const rec = await store.create('returns', {
+    returnNo: 'TH-' + String(order.orderNo || Date.now()).replace(/\W/g, ''),
+    orderNo: order.orderNo || '',
+    customerId: order.customerId || '',
+    customerName: order.customerName || '',
+    items: (order.items || []).map((it) => ({
+      productId: it.productId || '', sku: it.sku || productMap[it.productId]?.sku || '',
+      name: it.name || productMap[it.productId]?.name || '',
+      qty: Number(it.qty || 0), price: Number(it.price || 0),
+    })),
+    refundAmount: Number(req.body?.refundAmount ?? order.total ?? 0),
+    reason: req.body?.reason || '',
+    status: '待退货',
+    returnedAt: '',
+  })
+  res.json({ code: 200, message: '退货单已生成', data: rec })
+})
+
+// 确认退货：回补库存 + 写流水
+app.post('/api/stock/return-confirm/:id', authRequired, adminRequired, async (req, res) => {
+  const rec = await store.find('returns', req.params.id)
+  if (!rec) return res.status(404).json({ code: 404, message: '退货单不存在' })
+  if (rec.status === '已退货') return res.status(400).json({ code: 400, message: '该退货单已确认过' })
+  const products = await store.all('products')
+  for (const it of rec.items || []) {
+    const pid = it.productId || (it.sku && products.find((p) => p.sku === it.sku)?.id)
+    if (pid && Number(it.qty) > 0) await adjustStock(pid, Number(it.qty), { type: '退货入库', relatedNo: rec.returnNo, note: `销售退货 ${rec.customerName || ''}` })
+  }
+  await store.update('returns', rec.id, { status: '已退货', returnedAt: new Date().toISOString().slice(0, 10) })
+  const so = (await store.all('salesOrders')).find((o) => o.orderNo === rec.orderNo)
+  if (so) await store.update('salesOrders', so.id, { status: '已取消' })
+  res.json({ code: 200, message: '退货确认成功，库存已回补' })
+})
+
+// ---------- 数据导入导出 ----------
+// CSV 导入（商品/客户），body: { key, rows: [{...}] }
+app.post('/api/import', authRequired, adminRequired, async (req, res) => {
+  const { key, rows } = req.body || {}
+  if (!['products', 'customers'].includes(key)) return res.status(400).json({ code: 400, message: '仅支持导入商品和客户' })
+  if (!Array.isArray(rows) || !rows.length) return res.status(400).json({ code: 400, message: '没有可导入的数据' })
+  let added = 0, skipped = 0
+  const existing = await store.all(key)
+  const keyField = key === 'products' ? 'sku' : 'name'
+  const seen = new Set(existing.map((r) => r[keyField]).filter(Boolean))
+  for (const row of rows) {
+    const k = String(row[keyField] || '').trim()
+    if (!k || seen.has(k)) { skipped++; continue }
+    seen.add(k)
+    const rec = { ...row }
+    if (key === 'products') {
+      rec.stock = Number(row.stock || 0)
+      rec.costPrice = Number(row.costPrice || 0)
+      rec.salePrice = Number(row.salePrice || 0)
+      rec.safeStock = Number(row.safeStock || 0)
+      rec.status = rec.status || '在售'
+    }
+    if (key === 'customers') { rec.status = rec.status || '正常'; rec.level = rec.level || '普通' }
+    await store.create(key, rec)
+    added++
+  }
+  res.json({ code: 200, message: `导入完成：新增 ${added}，跳过 ${skipped}`, data: { added, skipped } })
+})
+
+// 导出：返回指定集合全部数据（前端转 CSV 下载）
+app.get('/api/export/:key', authRequired, adminRequired, async (req, res) => {
+  const key = req.params.key
+  const allowed = ['products', 'customers', 'suppliers', 'salesOrders', 'purchaseOrders', 'stockLogs', 'shops', 'platformOrders', 'cartons', 'waybills']
+  if (!allowed.includes(key)) return res.status(400).json({ code: 400, message: '该集合不支持导出' })
+  const rows = await store.all(key)
+  res.json({ code: 200, data: rows })
 })
 
 // ---------- 箱唛 / 面单生成 ----------

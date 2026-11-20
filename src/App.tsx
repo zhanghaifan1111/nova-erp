@@ -30,6 +30,8 @@ const OrderSync = lazy(() => import('./pages/OrderSync'))
 const Messages = lazy(() => import('./pages/Messages'))
 const ApiIntegration = lazy(() => import('./pages/ApiIntegration'))
 const Labels = lazy(() => import('./pages/Labels'))
+const StockFlow = lazy(() => import('./pages/StockFlow'))
+const DataIO = lazy(() => import('./pages/DataIO'))
 
 const Loading = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>
@@ -80,6 +82,8 @@ export default function App() {
           <Route path="/messages" element={<AdminOnly><Messages /></AdminOnly>} />
           <Route path="/api-integration" element={<AdminOnly><ApiIntegration /></AdminOnly>} />
           <Route path="/labels" element={<AdminOnly><Labels /></AdminOnly>} />
+          <Route path="/stock-flow" element={<AdminOnly><StockFlow /></AdminOnly>} />
+          <Route path="/data-io" element={<AdminOnly><DataIO /></AdminOnly>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

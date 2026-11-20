@@ -23,6 +23,7 @@ const adminMenu = [
       { key: '/sourcing', label: '商品采集箱' },
       { key: '/listings', label: '刊登管理' },
       { key: '/inventory', label: '库存管理' },
+      { key: '/stock-flow', label: '入库盘点退货' },
       { key: '/warehouses', label: '仓库管理' },
       { key: '/stock-transfers', label: '库存调拨' },
     ],
@@ -64,6 +65,7 @@ const adminMenu = [
       { key: '/accounts', label: '账号管理' },
       { key: '/customer-accounts', label: '客户账号管理' },
       { key: '/api-integration', label: 'API 对接 · 订单推送' },
+      { key: '/data-io', label: '数据导入导出' },
       { key: '/profile', label: '账号设置' },
     ],
   },
@@ -86,16 +88,17 @@ const titleMap: Record<string, string> = {
   '/sourcing': '商品采集箱', '/listings': '刊登管理',
   '/order-sync': '多平台订单同步', '/messages': '客户消息聚合',
   '/api-integration': 'API 对接 · 订单推送',
+  '/stock-flow': '入库盘点退货', '/data-io': '数据导入导出',
 }
 
 const groupKeys: Record<string, string> = {
   '/products': 'grp-product', '/sourcing': 'grp-product', '/listings': 'grp-product',
-  '/inventory': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product',
+  '/inventory': 'grp-product', '/stock-flow': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product',
   '/sales': 'grp-order', '/purchase': 'grp-order', '/shipments': 'grp-order', '/labels': 'grp-order', '/order-sync': 'grp-order',
   '/shops': 'grp-cross', '/shipping-methods': 'grp-cross', '/shipping-templates': 'grp-cross', '/messages': 'grp-cross',
   '/finance': 'grp-finance', '/profit': 'grp-finance', '/pricing': 'grp-finance',
   '/accounts': 'grp-account', '/customer-accounts': 'grp-account', '/profile': 'grp-account',
-  '/api-integration': 'grp-account',
+  '/api-integration': 'grp-account', '/data-io': 'grp-account',
 }
 
 export default function MainLayout() {

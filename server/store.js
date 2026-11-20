@@ -23,6 +23,7 @@ export const COLLECTIONS = [
   'sourcedProducts', 'listings', 'syncConfigs', 'syncLogs', 'platformOrders', 'messages', 'replyTemplates',
   'apiEndpoints', 'pushLogs',
   'cartons', 'waybills', 'printTemplates',
+  'receipts', 'stockChecks', 'returns',
   'users',
 ]
 const BUSINESS_COLLECTIONS = [
@@ -31,6 +32,7 @@ const BUSINESS_COLLECTIONS = [
   'sourcedProducts', 'listings', 'syncConfigs', 'syncLogs', 'platformOrders', 'messages', 'replyTemplates',
   'apiEndpoints', 'pushLogs',
   'cartons', 'waybills', 'printTemplates',
+  'receipts', 'stockChecks', 'returns',
 ]
 
 function emptyDb() {
