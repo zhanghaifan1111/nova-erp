@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { Layout, Menu, Button, Avatar, Tag, Tooltip, theme as antdTheme, Dropdown } from 'antd'
 import {
@@ -6,7 +6,7 @@ import {
   ShoppingOutlined, TeamOutlined, TruckOutlined, BarChartOutlined,
   MoonOutlined, SunOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
   BellOutlined, SettingOutlined, SafetyCertificateOutlined, UserOutlined,
-  LogoutOutlined, KeyOutlined, DownOutlined,
+  LogoutOutlined, KeyOutlined, DownOutlined, GlobalOutlined,
 } from '@ant-design/icons'
 import { useAppTheme } from '../theme'
 import { useAuth } from '../auth'
@@ -16,17 +16,51 @@ const { Header, Sider, Content } = Layout
 
 const adminMenu = [
   { key: '/', icon: <DashboardOutlined />, label: '经营总览' },
-  { key: '/products', icon: <AppstoreOutlined />, label: '商品管理' },
-  { key: '/inventory', icon: <DatabaseOutlined />, label: '库存管理' },
-  { key: '/sales', icon: <ShoppingCartOutlined />, label: '销售订单' },
-  { key: '/purchase', icon: <ShoppingOutlined />, label: '采购订单' },
+  {
+    key: 'grp-product', icon: <AppstoreOutlined />, label: '商品与库存',
+    children: [
+      { key: '/products', label: '商品管理' },
+      { key: '/inventory', label: '库存管理' },
+      { key: '/warehouses', label: '仓库管理' },
+      { key: '/stock-transfers', label: '库存调拨' },
+    ],
+  },
+  {
+    key: 'grp-order', icon: <ShoppingCartOutlined />, label: '订单与发货',
+    children: [
+      { key: '/sales', label: '销售订单' },
+      { key: '/purchase', label: '采购订单' },
+      { key: '/shipments', label: '打单发货' },
+    ],
+  },
+  {
+    key: 'grp-cross', icon: <GlobalOutlined />, label: '跨境电商',
+    children: [
+      { key: '/shops', label: '店铺管理' },
+      { key: '/shipping-methods', label: '物流渠道' },
+      { key: '/shipping-templates', label: '运费模板' },
+    ],
+  },
+  {
+    key: 'grp-finance', icon: <BarChartOutlined />, label: '财务与定价',
+    children: [
+      { key: '/finance', label: '财务报表' },
+      { key: '/profit', label: '利润核算' },
+      { key: '/pricing', label: '定价计算器' },
+    ],
+  },
   { type: 'divider' as const },
   { key: '/customers', icon: <TeamOutlined />, label: '客户管理' },
   { key: '/suppliers', icon: <TruckOutlined />, label: '供应商管理' },
-  { key: '/finance', icon: <BarChartOutlined />, label: '财务报表' },
   { type: 'divider' as const },
-  { key: '/accounts', icon: <SafetyCertificateOutlined />, label: '账号管理' },
-  { key: '/customer-accounts', icon: <UserOutlined />, label: '客户账号管理' },
+  {
+    key: 'grp-account', icon: <SafetyCertificateOutlined />, label: '系统设置',
+    children: [
+      { key: '/accounts', label: '账号管理' },
+      { key: '/customer-accounts', label: '客户账号管理' },
+      { key: '/profile', label: '账号设置' },
+    ],
+  },
 ]
 
 const customerMenu = [
@@ -40,10 +74,22 @@ const titleMap: Record<string, string> = {
   '/sales': '销售订单', '/purchase': '采购订单', '/customers': '客户管理',
   '/suppliers': '供应商管理', '/finance': '财务报表', '/accounts': '账号管理',
   '/customer-accounts': '客户账号管理', '/profile': '账号设置',
+  '/shops': '店铺管理', '/warehouses': '仓库管理', '/shipping-methods': '物流渠道',
+  '/shipping-templates': '运费模板', '/stock-transfers': '库存调拨',
+  '/shipments': '打单发货', '/profit': '利润核算', '/pricing': '定价计算器',
+}
+
+const groupKeys: Record<string, string> = {
+  '/products': 'grp-product', '/inventory': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product',
+  '/sales': 'grp-order', '/purchase': 'grp-order', '/shipments': 'grp-order',
+  '/shops': 'grp-cross', '/shipping-methods': 'grp-cross', '/shipping-templates': 'grp-cross',
+  '/finance': 'grp-finance', '/profit': 'grp-finance', '/pricing': 'grp-finance',
+  '/accounts': 'grp-account', '/customer-accounts': 'grp-account', '/profile': 'grp-account',
 }
 
 export default function MainLayout() {
   const [collapsed, setCollapsed] = useState(false)
+  const [openKeys, setOpenKeys] = useState<string[]>([])
   const navigate = useNavigate()
   const location = useLocation()
   const { dark, toggle } = useAppTheme()
@@ -52,6 +98,11 @@ export default function MainLayout() {
 
   const menuItems = isAdmin ? adminMenu : customerMenu
   const title = titleMap[location.pathname] || (location.pathname === '/profile' ? '账号设置' : 'Nova ERP')
+
+  useEffect(() => {
+    const g = groupKeys[location.pathname]
+    if (g) setOpenKeys((prev) => prev.includes(g) ? prev : [...prev, g])
+  }, [location.pathname])
 
   const onLogout = () => { logout(); navigate('/login') }
 
@@ -76,16 +127,15 @@ export default function MainLayout() {
             </div>
           )}
         </div>
-        <Menu theme="dark" mode="inline" selectedKeys={[location.pathname]} items={menuItems}
-          onClick={({ key }) => navigate(key)} style={{ marginTop: 8, background: 'transparent', borderInlineEnd: 'none' }} />
-        {!collapsed && (
-          <div className="sider-footer">
-            <div className="sider-tip-card">
-              <div className="sider-tip-title">{isAdmin ? '管理员' : '客户账号'}</div>
-              <div className="sider-tip-desc">{isAdmin ? '数据本地持久化 · 全流程管理' : '仅可查看您自己的订单与资料'}</div>
-            </div>
-          </div>
-        )}
+        <div className="sider-menu-scroll">
+          <Menu
+            theme="dark" mode="inline" selectedKeys={[location.pathname]} items={menuItems}
+            openKeys={openKeys}
+            onOpenChange={(keys) => setOpenKeys(keys as string[])}
+            onClick={({ key }: { key: string }) => { if (groupKeys[key]) return; navigate(key) }}
+            style={{ marginTop: 8, background: 'transparent', borderInlineEnd: 'none' }}
+          />
+        </div>
       </Sider>
 
       <Layout style={{ marginLeft: collapsed ? 80 : 236, transition: 'margin-left .2s' }}>

@@ -16,6 +16,14 @@ const Finance = lazy(() => import('./pages/Finance'))
 const Accounts = lazy(() => import('./pages/Accounts'))
 const CustomerAccounts = lazy(() => import('./pages/CustomerAccounts'))
 const Profile = lazy(() => import('./pages/Profile'))
+const Shops = lazy(() => import('./pages/Shops'))
+const Warehouses = lazy(() => import('./pages/Warehouses'))
+const ShippingMethods = lazy(() => import('./pages/ShippingMethods'))
+const ShippingTemplates = lazy(() => import('./pages/ShippingTemplates'))
+const StockTransfers = lazy(() => import('./pages/StockTransfers'))
+const Shipments = lazy(() => import('./pages/Shipments'))
+const Profit = lazy(() => import('./pages/Profit'))
+const Pricing = lazy(() => import('./pages/Pricing'))
 
 const Loading = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>
@@ -52,6 +60,14 @@ export default function App() {
           <Route path="/finance" element={<AdminOnly><Finance /></AdminOnly>} />
           <Route path="/accounts" element={<AdminOnly><Accounts /></AdminOnly>} />
           <Route path="/customer-accounts" element={<AdminOnly><CustomerAccounts /></AdminOnly>} />
+          <Route path="/shops" element={<AdminOnly><Shops /></AdminOnly>} />
+          <Route path="/warehouses" element={<AdminOnly><Warehouses /></AdminOnly>} />
+          <Route path="/shipping-methods" element={<AdminOnly><ShippingMethods /></AdminOnly>} />
+          <Route path="/shipping-templates" element={<AdminOnly><ShippingTemplates /></AdminOnly>} />
+          <Route path="/stock-transfers" element={<AdminOnly><StockTransfers /></AdminOnly>} />
+          <Route path="/shipments" element={<AdminOnly><Shipments /></AdminOnly>} />
+          <Route path="/profit" element={<AdminOnly><Profit /></AdminOnly>} />
+          <Route path="/pricing" element={<AdminOnly><Pricing /></AdminOnly>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

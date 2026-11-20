@@ -150,7 +150,10 @@ app.get('/api/customer-accounts', authRequired, adminRequired, async (req, res) 
 })
 
 // ---------- 通用 CRUD（鉴权 + 客户只读且仅看自己） ----------
-const COLLECTIONS = ['products', 'customers', 'suppliers', 'salesOrders', 'purchaseOrders', 'stockLogs']
+const COLLECTIONS = [
+  'products', 'customers', 'suppliers', 'salesOrders', 'purchaseOrders', 'stockLogs',
+  'shops', 'warehouses', 'shippingMethods', 'shippingTemplates', 'stockTransfers', 'shipments',
+]
 
 function scopeRows(req, key, rows) {
   if (req.user?.role === 'admin') return rows
@@ -258,6 +261,75 @@ app.get('/api/dashboard', authRequired, async (req, res) => {
       lowStock: lowStock.slice(0, 6).map((p) => ({ sku: p.sku, name: p.name, stock: p.stock, safeStock: p.safeStock })),
       recentOrders: [...sales].sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || '')).slice(0, 6),
       isCustomer,
+    },
+  })
+})
+
+// ---------- 利润核算 ----------
+// 按销售订单逐单核算：收入 - 采购成本 - 运费 - 平台佣金 - 其他费用
+app.get('/api/profit', authRequired, adminRequired, async (req, res) => {
+  const [sales, products, shippingMethods, shops] = await Promise.all([
+    store.all('salesOrders'), store.all('products'), store.all('shippingMethods'), store.all('shops'),
+  ])
+  const productMap = Object.fromEntries(products.map((p) => [p.id, p]))
+  const shopMap = Object.fromEntries(shops.map((s) => [s.id, s]))
+  const shipMap = Object.fromEntries(shippingMethods.map((s) => [s.id, s]))
+
+  const rows = sales.filter((o) => o.status !== '已取消').map((o) => {
+    const cost = (o.items || []).reduce((s, it) => s + (productMap[it.productId]?.costPrice || it.price || 0) * it.qty, 0)
+    const revenue = o.total || 0
+    const shippingFee = Number(o.shippingFee || 0)
+    const shop = shopMap[o.shopId]
+    const commissionRate = Number(shop?.commissionRate || 0) / 100
+    const commission = revenue * commissionRate
+    const otherFee = Number(o.otherFee || 0)
+    const profit = revenue - cost - shippingFee - commission - otherFee
+    return {
+      id: o.id, orderNo: o.orderNo, customerName: o.customerName,
+      shopName: shop?.name || o.shopName || '-', orderDate: o.orderDate, status: o.status,
+      revenue: Math.round(revenue * 100) / 100,
+      cost: Math.round(cost * 100) / 100,
+      shippingFee,
+      commission: Math.round(commission * 100) / 100,
+      otherFee,
+      profit: Math.round(profit * 100) / 100,
+      margin: revenue ? Math.round((profit / revenue) * 1000) / 10 : 0,
+    }
+  }).sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''))
+
+  const sum = rows.reduce((acc, r) => {
+    acc.revenue += r.revenue; acc.cost += r.cost; acc.shippingFee += r.shippingFee
+    acc.commission += r.commission; acc.otherFee += r.otherFee; acc.profit += r.profit
+    return acc
+  }, { revenue: 0, cost: 0, shippingFee: 0, commission: 0, otherFee: 0, profit: 0 })
+  Object.keys(sum).forEach((k) => { sum[k] = Math.round(sum[k] * 100) / 100 })
+  sum.margin = sum.revenue ? Math.round((sum.profit / sum.revenue) * 1000) / 10 : 0
+
+  res.json({ code: 200, data: { rows, sum } })
+})
+
+// ---------- 定价计算 ----------
+// 给定成本/运费/平台佣金率/目标利润率，反推建议售价
+app.post('/api/pricing', authRequired, (req, res) => {
+  const { cost = 0, shipping = 0, commissionRate = 0, targetMargin = 0, otherFee = 0 } = req.body || {}
+  const c = Number(cost) || 0, s = Number(shipping) || 0
+  const cr = Number(commissionRate) || 0, tm = Number(targetMargin) || 0, of = Number(otherFee) || 0
+  // 售价 P 满足：(P - P*cr/100 - c - s - of) / P = tm/100
+  // => P * (1 - cr/100 - tm/100) = c + s + of
+  const denominator = 1 - cr / 100 - tm / 100
+  if (denominator <= 0) {
+    return res.status(400).json({ code: 400, message: '佣金率 + 目标利润率 必须小于 100%' })
+  }
+  const price = (c + s + of) / denominator
+  const commission = price * cr / 100
+  const profit = price - commission - c - s - of
+  res.json({
+    code: 200,
+    data: {
+      price: Math.round(price * 100) / 100,
+      commission: Math.round(commission * 100) / 100,
+      profit: Math.round(profit * 100) / 100,
+      margin: Math.round((profit / price) * 1000) / 10,
     },
   })
 })

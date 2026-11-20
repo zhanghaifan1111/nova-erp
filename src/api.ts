@@ -48,6 +48,8 @@ export const api = {
   update: (key: string, id: string, body: any) => request(`/${key}/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   remove: (key: string, id: string) => request(`/${key}/${id}`, { method: 'DELETE' }),
   dashboard: () => request('/dashboard'),
+  profit: () => request<{ code: number; data: { rows: any[]; sum: any } }>('/profit'),
+  pricing: (body: any) => request('/pricing', { method: 'POST', body: JSON.stringify(body) }),
   health: () => request('/health'),
 }
 

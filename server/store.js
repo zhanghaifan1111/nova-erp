@@ -17,8 +17,15 @@ let memoryDb = null
 const uid = (p = 'id') => p + '_' + Math.random().toString(36).slice(2, 10)
 const today = () => new Date().toISOString().slice(0, 10)
 
-export const COLLECTIONS = ['products', 'customers', 'suppliers', 'salesOrders', 'purchaseOrders', 'stockLogs', 'users']
-const BUSINESS_COLLECTIONS = ['products', 'customers', 'suppliers', 'salesOrders', 'purchaseOrders', 'stockLogs']
+export const COLLECTIONS = [
+  'products', 'customers', 'suppliers', 'salesOrders', 'purchaseOrders', 'stockLogs',
+  'shops', 'warehouses', 'shippingMethods', 'shippingTemplates', 'stockTransfers', 'shipments',
+  'users',
+]
+const BUSINESS_COLLECTIONS = [
+  'products', 'customers', 'suppliers', 'salesOrders', 'purchaseOrders', 'stockLogs',
+  'shops', 'warehouses', 'shippingMethods', 'shippingTemplates', 'stockTransfers', 'shipments',
+]
 
 function emptyDb() {
   return Object.fromEntries(COLLECTIONS.map((k) => [k, []]))
