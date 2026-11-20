@@ -139,7 +139,7 @@ export default function MainLayout() {
             theme="dark" mode="inline" selectedKeys={[location.pathname]} items={menuItems}
             openKeys={openKeys}
             onOpenChange={(keys) => setOpenKeys(keys as string[])}
-            onClick={({ key }: { key: string }) => { if (groupKeys[key]) return; navigate(key) }}
+            onClick={({ key }: { key: string }) => { if (key.startsWith('grp-')) return; navigate(key) }}
             style={{ marginTop: 8, background: 'transparent', borderInlineEnd: 'none' }}
           />
         </div>
