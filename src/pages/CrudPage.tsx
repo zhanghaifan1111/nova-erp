@@ -11,6 +11,7 @@ export type Field = {
   options?: { label: string; value: string }[]
   required?: boolean
   span?: number
+  placeholder?: string
 }
 
 type Props = {

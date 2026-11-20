@@ -51,7 +51,7 @@ export default function EditModal({ open, title, fields, initialValues, onCancel
               ) : f.type === 'select' ? (
                 <Select options={f.options} placeholder={`请选择${f.label}`} />
               ) : (
-                <Input placeholder={`请输入${f.label}`} />
+                <Input placeholder={f.placeholder || `请输入${f.label}`} />
               )}
             </Form.Item>
           ))}

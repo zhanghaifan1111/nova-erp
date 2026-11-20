@@ -62,6 +62,7 @@ const adminMenu = [
     children: [
       { key: '/accounts', label: '账号管理' },
       { key: '/customer-accounts', label: '客户账号管理' },
+      { key: '/api-integration', label: 'API 对接 · 订单推送' },
       { key: '/profile', label: '账号设置' },
     ],
   },
@@ -83,6 +84,7 @@ const titleMap: Record<string, string> = {
   '/shipments': '打单发货', '/profit': '利润核算', '/pricing': '定价计算器',
   '/sourcing': '商品采集箱', '/listings': '刊登管理',
   '/order-sync': '多平台订单同步', '/messages': '客户消息聚合',
+  '/api-integration': 'API 对接 · 订单推送',
 }
 
 const groupKeys: Record<string, string> = {
@@ -92,6 +94,7 @@ const groupKeys: Record<string, string> = {
   '/shops': 'grp-cross', '/shipping-methods': 'grp-cross', '/shipping-templates': 'grp-cross', '/messages': 'grp-cross',
   '/finance': 'grp-finance', '/profit': 'grp-finance', '/pricing': 'grp-finance',
   '/accounts': 'grp-account', '/customer-accounts': 'grp-account', '/profile': 'grp-account',
+  '/api-integration': 'grp-account',
 }
 
 export default function MainLayout() {

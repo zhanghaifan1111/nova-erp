@@ -55,6 +55,11 @@ export const api = {
   syncImport: (body: any) => request('/sync/import', { method: 'POST', body: JSON.stringify(body) }),
   syncToSales: (id: string) => request(`/sync/to-sales/${id}`, { method: 'POST' }),
   replyMessage: (id: string, content: string) => request(`/messages/${id}/reply`, { method: 'POST', body: JSON.stringify({ content }) }),
+  pushOrder: (id: string, endpointId?: string) => request('/push/order/' + id, { method: 'POST', body: JSON.stringify({ endpointId }) }),
+  pushOrders: (orderIds: string[], endpointId?: string) => request('/push/orders', { method: 'POST', body: JSON.stringify({ orderIds, endpointId }) }),
+  pushRetry: (logId: string) => request('/push/retry/' + logId, { method: 'POST' }),
+  pushTest: (endpointId?: string) => request('/push/test', { method: 'POST', body: JSON.stringify({ endpointId }) }),
+  pushPreview: (id: string) => request('/push/preview/' + id),
   health: () => request('/health'),
 }
 

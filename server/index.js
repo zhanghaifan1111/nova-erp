@@ -2,6 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import path from 'node:path'
 import fs from 'node:fs'
+import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
@@ -154,6 +155,7 @@ const COLLECTIONS = [
   'products', 'customers', 'suppliers', 'salesOrders', 'purchaseOrders', 'stockLogs',
   'shops', 'warehouses', 'shippingMethods', 'shippingTemplates', 'stockTransfers', 'shipments',
   'sourcedProducts', 'listings', 'syncConfigs', 'syncLogs', 'platformOrders', 'messages', 'replyTemplates',
+  'apiEndpoints', 'pushLogs',
 ]
 
 function scopeRows(req, key, rows) {
@@ -398,6 +400,172 @@ app.post('/api/messages/:id/reply', authRequired, async (req, res) => {
   replies.push({ content: String(content).trim(), at: new Date().toISOString(), by: req.user?.name || req.user?.username || '系统' })
   const rec = await store.update('messages', msg.id, { status: '已回复', replies, repliedAt: new Date().toISOString().slice(0, 10) })
   res.json({ code: 200, message: '回复成功', data: rec })
+})
+
+// ---------- 订单推送到外部系统（Webhook / open API） ----------
+const PUSH_TIMEOUT = 15000
+
+function buildOrderPayload(order, products, shops) {
+  const productMap = Object.fromEntries(products.map((p) => [p.id, p]))
+  const shop = shops.find((s) => s.id === order.shopId)
+  return {
+    event: 'order.created',
+    eventId: order.id,
+    timestamp: new Date().toISOString(),
+    data: {
+      orderNo: order.orderNo,
+      platformOrderNo: order.platformOrderNo || '',
+      orderDate: order.orderDate || '',
+      status: order.status || '',
+      customer: {
+        id: order.customerId || '',
+        name: order.customerName || '',
+      },
+      shop: { id: order.shopId || '', name: shop?.name || order.shopName || '', platform: shop?.platform || '' },
+      items: (order.items || []).map((it) => ({
+        sku: it.sku || productMap[it.productId]?.sku || '',
+        name: it.name || productMap[it.productId]?.name || '',
+        qty: Number(it.qty || 0),
+        price: Number(it.price || 0),
+        subtotal: Math.round(Number(it.qty || 0) * Number(it.price || 0) * 100) / 100,
+      })),
+      total: Number(order.total || 0),
+      shippingFee: Number(order.shippingFee || 0),
+      otherFee: Number(order.otherFee || 0),
+      currency: order.currency || 'CNY',
+    },
+  }
+}
+
+// 实际执行一次 HTTP 推送，返回 {ok, status, response, error}
+async function doPush(endpoint, payload) {
+  const body = JSON.stringify(payload)
+  const headers = { 'Content-Type': 'application/json', 'User-Agent': 'ZhouGuixiang-ERP/1.0' }
+  const authType = endpoint.authType || 'none'
+  try {
+    if (authType === 'bearer' && endpoint.token) headers.Authorization = `Bearer ${endpoint.token}`
+    if (authType === 'apikey' && endpoint.apiKey) {
+      headers[endpoint.headerName || 'X-API-Key'] = endpoint.apiKey
+    }
+    if (authType === 'hmac' && endpoint.secret) {
+      const sig = crypto.createHmac('sha256', endpoint.secret).update(body).digest('hex')
+      headers['X-Signature'] = sig
+      headers['X-Signature-Alg'] = 'hmac-sha256'
+      if (endpoint.apiKey) headers[endpoint.headerName || 'X-API-Key'] = endpoint.apiKey
+    }
+    // 自定义请求头
+    if (Array.isArray(endpoint.headers)) {
+      endpoint.headers.forEach((h) => { if (h?.key && h?.value) headers[h.key] = h.value })
+    }
+    const ctl = new AbortController()
+    const timer = setTimeout(() => ctl.abort(), PUSH_TIMEOUT)
+    let res, text
+    try {
+      res = await fetch(endpoint.url, {
+        method: endpoint.method || 'POST',
+        headers,
+        body,
+        signal: ctl.signal,
+      })
+      text = await res.text()
+    } finally { clearTimeout(timer) }
+    const ok = res.status >= 200 && res.status < 300
+    return { ok, status: res.status, response: text.slice(0, 2000), error: ok ? '' : `HTTP ${res.status}` }
+  } catch (e) {
+    return { ok: false, status: 0, response: '', error: String(e?.message || e) }
+  }
+}
+
+async function pushOrders(orderIds, endpointId) {
+  const endpoints = await store.all('apiEndpoints')
+  const endpoint = endpointId
+    ? endpoints.find((e) => e.id === endpointId)
+    : endpoints.find((e) => e.enabled === '启用')
+  if (!endpoint) return { error: '没有找到可用的推送目标，请先在「API 对接」配置' }
+  if (endpoint.enabled !== '启用') return { error: '该推送目标已停用' }
+  if (!endpoint.url) return { error: '推送目标未填写 URL' }
+
+  const [sales, products, shops] = await Promise.all([
+    store.all('salesOrders'), store.all('products'), store.all('shops'),
+  ])
+  const results = []
+  for (const id of orderIds) {
+    const order = sales.find((o) => o.id === id)
+    if (!order) { results.push({ orderId: id, ok: false, error: '订单不存在' }); continue }
+    const payload = buildOrderPayload(order, products, shops)
+    const r = await doPush(endpoint, payload)
+    await store.create('pushLogs', {
+      endpointId: endpoint.id, endpointName: endpoint.name,
+      orderId: order.id, orderNo: order.orderNo,
+      payload: JSON.stringify(payload).slice(0, 4000),
+      status: r.ok ? '成功' : '失败',
+      httpCode: r.status, response: r.response, error: r.error,
+      pushedAt: new Date().toISOString(),
+    })
+    results.push({ orderId: order.id, orderNo: order.orderNo, ok: r.ok, status: r.status, error: r.error })
+  }
+  const okCount = results.filter((r) => r.ok).length
+  return { endpoint: endpoint.name, total: results.length, okCount, failCount: results.length - okCount, results }
+}
+
+app.post('/api/push/order/:id', authRequired, adminRequired, async (req, res) => {
+  const r = await pushOrders([req.params.id], req.body?.endpointId)
+  r.error ? res.status(400).json({ code: 400, message: r.error }) : res.json({ code: 200, message: `推送完成：成功 ${r.okCount}，失败 ${r.failCount}`, data: r })
+})
+
+app.post('/api/push/orders', authRequired, adminRequired, async (req, res) => {
+  const ids = req.body?.orderIds
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ code: 400, message: '请选择要推送的订单' })
+  const r = await pushOrders(ids, req.body?.endpointId)
+  r.error ? res.status(400).json({ code: 400, message: r.error }) : res.json({ code: 200, message: `推送完成：成功 ${r.okCount}，失败 ${r.failCount}`, data: r })
+})
+
+app.post('/api/push/retry/:logId', authRequired, adminRequired, async (req, res) => {
+  const log = await store.find('pushLogs', req.params.logId)
+  if (!log) return res.status(404).json({ code: 404, message: '推送记录不存在' })
+  const endpoint = await store.find('apiEndpoints', log.endpointId)
+  if (!endpoint) return res.status(404).json({ code: 404, message: '推送目标不存在' })
+  let payload
+  try { payload = JSON.parse(log.payload) } catch { return res.status(400).json({ code: 400, message: '原始报文损坏，无法重试' }) }
+  // 刷新时间戳与事件 ID，表明是重试
+  payload.timestamp = new Date().toISOString()
+  payload.retryOf = log.id
+  const r = await doPush(endpoint, payload)
+  await store.create('pushLogs', {
+    endpointId: endpoint.id, endpointName: endpoint.name,
+    orderId: log.orderId, orderNo: log.orderNo,
+    payload: JSON.stringify(payload).slice(0, 4000),
+    status: r.ok ? '成功' : '失败',
+    httpCode: r.status, response: r.response, error: r.error,
+    pushedAt: new Date().toISOString(), retryOf: log.id,
+  })
+  r.ok ? res.json({ code: 200, message: '重试成功', data: r })
+      : res.status(502).json({ code: 502, message: `重试失败：${r.error}` })
+})
+
+app.post('/api/push/test', authRequired, adminRequired, async (req, res) => {
+  const endpointId = req.body?.endpointId
+  const endpoints = await store.all('apiEndpoints')
+  const endpoint = endpointId ? endpoints.find((e) => e.id === endpointId) : endpoints.find((e) => e.enabled === '启用')
+  if (!endpoint) return res.status(400).json({ code: 400, message: '没有找到推送目标' })
+  if (!endpoint.url) return res.status(400).json({ code: 400, message: '推送目标未填写 URL' })
+  const payload = {
+    event: 'connection.test',
+    timestamp: new Date().toISOString(),
+    data: { message: '这是来自周桂祥的ERP的测试推送', endpoint: endpoint.name },
+  }
+  const r = await doPush(endpoint, payload)
+  r.ok ? res.json({ code: 200, message: '连接成功', data: r })
+      : res.status(502).json({ code: 502, message: `连接失败：${r.error}`, data: r })
+})
+
+// 获取可预览的订单推送报文（不实际发送）
+app.get('/api/push/preview/:id', authRequired, adminRequired, async (req, res) => {
+  const [order, products, shops] = await Promise.all([
+    store.find('salesOrders', req.params.id), store.all('products'), store.all('shops'),
+  ])
+  if (!order) return res.status(404).json({ code: 404, message: '订单不存在' })
+  res.json({ code: 200, data: buildOrderPayload(order, products, shops) })
 })
 
 // ---------- 利润核算 ----------
