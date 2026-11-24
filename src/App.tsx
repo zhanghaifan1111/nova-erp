@@ -35,6 +35,10 @@ const DataIO = lazy(() => import('./pages/DataIO'))
 const Payments = lazy(() => import('./pages/Payments'))
 const Crm = lazy(() => import('./pages/Crm'))
 const WarehouseFx = lazy(() => import('./pages/WarehouseFx'))
+const Intelligence = lazy(() => import('./pages/Intelligence'))
+const Workflow = lazy(() => import('./pages/Workflow'))
+const Compliance = lazy(() => import('./pages/Compliance'))
+const WarehouseIntel = lazy(() => import('./pages/WarehouseIntel'))
 
 const Loading = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>
@@ -90,6 +94,10 @@ export default function App() {
           <Route path="/payments" element={<AdminOnly><Payments /></AdminOnly>} />
           <Route path="/crm" element={<AdminOnly><Crm /></AdminOnly>} />
           <Route path="/warehouse-fx" element={<AdminOnly><WarehouseFx /></AdminOnly>} />
+          <Route path="/intelligence" element={<AdminOnly><Intelligence /></AdminOnly>} />
+          <Route path="/workflow" element={<AdminOnly><Workflow /></AdminOnly>} />
+          <Route path="/compliance" element={<AdminOnly><Compliance /></AdminOnly>} />
+          <Route path="/warehouse-intel" element={<AdminOnly><WarehouseIntel /></AdminOnly>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

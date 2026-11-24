@@ -150,6 +150,30 @@ app.get('/api/customer-accounts', authRequired, adminRequired, async (req, res) 
   res.json({ code: 200, data: rows, total: rows.length })
 })
 
+// ---------- 操作审计：记录所有写操作 ----------
+app.use('/api', async (req, res, next) => {
+  if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
+    const originalSend = res.send.bind(res)
+    res.send = function (body) {
+      // 响应成功才记录（2xx）
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        store.create('auditLogs', {
+          method: req.method,
+          path: req.originalUrl.split('?')[0],
+          actor: req.user?.name || req.user?.username || '匿名',
+          actorId: req.user?.id || '',
+          role: req.user?.role || '',
+          ip: (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().split(',')[0].trim(),
+          body: req.body && Object.keys(req.body).length ? JSON.stringify(req.body).slice(0, 2000) : '',
+          at: new Date().toISOString(),
+        }).catch(() => {})
+      }
+      return originalSend(body)
+    }
+  }
+  next()
+})
+
 // ---------- 通用 CRUD（鉴权 + 客户只读且仅看自己） ----------
 const COLLECTIONS = [
   'products', 'customers', 'suppliers', 'salesOrders', 'purchaseOrders', 'stockLogs',
@@ -159,6 +183,7 @@ const COLLECTIONS = [
   'cartons', 'waybills', 'printTemplates',
   'receipts', 'stockChecks', 'returns',
   'payments', 'followUps', 'pickLists', 'exchangeRates',
+  'approvals', 'expenses', 'invoices', 'auditLogs', 'locations',
 ]
 
 function scopeRows(req, key, rows) {
@@ -403,6 +428,273 @@ app.post('/api/messages/:id/reply', authRequired, async (req, res) => {
   replies.push({ content: String(content).trim(), at: new Date().toISOString(), by: req.user?.name || req.user?.username || '系统' })
   const rec = await store.update('messages', msg.id, { status: '已回复', replies, repliedAt: new Date().toISOString().slice(0, 10) })
   res.json({ code: 200, message: '回复成功', data: rec })
+})
+
+// ---------- 智能补货建议 ----------
+// 算法：日均销量（近90天销售订单） × (采购提前期 + 安全天数) - 当前库存 - 在途
+// 采购提前期从供应商 leadTime 字段取，默认 7 天；安全天数默认 7 天
+app.get('/api/replenish/suggest', authRequired, adminRequired, async (req, res) => {
+  const leadDays = Math.max(1, Number(req.query.leadDays || 7))
+  const safetyDays = Math.max(0, Number(req.query.safetyDays || 7))
+  const [products, sales, purchases, stockTransfers] = await Promise.all([
+    store.all('products'), store.all('salesOrders'), store.all('purchaseOrders'), store.all('stockTransfers'),
+  ])
+  const now = new Date()
+  const cutoff = new Date(now.getTime() - 90 * 86400000).toISOString().slice(0, 10)
+  // 近90天各商品销量
+  const sold = {}
+  sales.filter((o) => (o.orderDate || '') >= cutoff && o.status !== '已取消')
+    .forEach((o) => (o.items || []).forEach((it) => {
+      const pid = it.productId || (products.find((p) => p.sku === it.sku)?.id)
+      if (pid) sold[pid] = (sold[pid] || 0) + Number(it.qty || 0)
+    }))
+  // 在途：未完成采购单
+  const inbound = {}
+  purchases.filter((o) => !['已完成', '已取消'].includes(o.status))
+    .forEach((o) => (o.items || []).forEach((it) => {
+      const pid = it.productId || (products.find((p) => p.sku === it.sku)?.id)
+      if (pid) inbound[pid] = (inbound[pid] || 0) + Number(it.qty || 0)
+    }))
+  const rows = products.map((p) => {
+    const dailySales = (sold[p.id] || 0) / 90
+    const stock = Number(p.stock || 0)
+    const onWay = inbound[p.id] || 0
+    const safe = Number(p.safeStock || 0)
+    const need = Math.ceil(dailySales * (leadDays + safetyDays) + safe - stock - onWay)
+    const coveredDays = dailySales > 0 ? Math.floor((stock + onWay) / dailySales) : 999
+    return {
+      productId: p.id, sku: p.sku, name: p.name,
+      stock, safeStock: safe, onWay, dailySales: Math.round(dailySales * 100) / 100,
+      coveredDays, suggestQty: Math.max(0, need),
+      costPrice: Number(p.costPrice || 0),
+      suggestAmount: Math.round(Math.max(0, need) * Number(p.costPrice || 0) * 100) / 100,
+      urgency: coveredDays < leadDays ? '紧急' : coveredDays < leadDays + safetyDays ? '偏低' : '正常',
+    }
+  }).filter((r) => r.suggestQty > 0)
+    .sort((a, b) => a.coveredDays - b.coveredDays)
+  res.json({
+    code: 200,
+    data: {
+      rows,
+      sum: {
+        items: rows.length,
+        amount: Math.round(rows.reduce((s, r) => s + r.suggestAmount, 0) * 100) / 100,
+        urgent: rows.filter((r) => r.urgency === '紧急').length,
+      },
+      params: { leadDays, safetyDays },
+    },
+  })
+})
+
+// 一键把补货建议转成采购草稿
+app.post('/api/replenish/to-purchase', authRequired, adminRequired, async (req, res) => {
+  const { items } = req.body || {}
+  if (!Array.isArray(items) || !items.length) return res.status(400).json({ code: 400, message: '请选择要补货的商品' })
+  const products = await store.all('products')
+  const orderItems = items.map((it) => {
+    const p = products.find((x) => x.id === (it.productId || x.id))
+    return {
+      productId: it.productId, sku: it.sku || p?.sku || '', name: it.name || p?.name || '',
+      qty: Number(it.qty || 0), price: Number(it.price || p?.costPrice || 0),
+    }
+  }).filter((it) => it.qty > 0)
+  if (!orderItems.length) return res.status(400).json({ code: 400, message: '没有有效数量的补货项' })
+  const rec = await store.create('purchaseOrders', {
+    orderNo: 'PO-SUG-' + Date.now().toString().slice(-6),
+    supplierName: req.body?.supplierName || '',
+    items: orderItems,
+    total: Math.round(orderItems.reduce((s, it) => s + it.qty * it.price, 0) * 100) / 100,
+    status: '待审批',
+    source: '智能补货建议',
+  })
+  res.json({ code: 200, message: `已生成采购草稿（${orderItems.length} 项）`, data: rec })
+})
+
+// ---------- RFM 客户价值分析 ----------
+// R 最近下单距今天数，F 订单数，M 累计消费；各打 1-5 分，分 8 类
+app.get('/api/rfm/analyze', authRequired, adminRequired, async (req, res) => {
+  const [customers, sales] = await Promise.all([store.all('customers'), store.all('salesOrders')])
+  const now = new Date()
+  const stats = {}
+  sales.filter((o) => o.status !== '已取消' && o.customerId).forEach((o) => {
+    const s = stats[o.customerId] || (stats[o.customerId] = { last: '', count: 0, money: 0 })
+    if ((o.orderDate || '') > s.last) s.last = o.orderDate || ''
+    s.count++
+    s.money += Number(o.total || 0)
+  })
+  const rows = customers.map((c) => {
+    const s = stats[c.id] || { last: '', count: 0, money: 0 }
+    const recencyDays = s.last ? Math.floor((now - new Date(s.last)) / 86400000) : 999
+    const score = (v, breaks, asc) => {
+      // asc=true: 值越小分越高（R）；asc=false: 值越大分越高（F/M）
+      if (!v && v !== 0) return 1
+      for (let i = 0; i < breaks.length; i++) {
+        if (asc ? v <= breaks[i] : v >= breaks[i]) return 5 - i
+      }
+      return 1
+    }
+    const R = score(recencyDays, [30, 60, 90, 180], true)
+    const F = score(s.count, [5, 3, 2, 1], false)
+    const M = score(s.money, [10000, 5000, 1000, 100], false)
+    const avg = (R + F + M) / 3
+    let segment = ''
+    if (R >= 4 && F >= 4) segment = '重要价值客户'
+    else if (R < 4 && F >= 4) segment = '重要保持客户'
+    else if (R >= 4 && F < 4) segment = '重要发展客户'
+    else if (R < 4 && F < 4 && M >= 4) segment = '重要挽留客户'
+    else if (avg >= 3.5) segment = '一般价值客户'
+    else if (avg >= 2.5) segment = '一般保持客户'
+    else if (avg >= 1.8) segment = '一般发展客户'
+    else segment = '一般挽留客户'
+    return {
+      customerId: c.id, customerName: c.name,
+      recencyDays: recencyDays === 999 ? '-' : recencyDays,
+      frequency: s.count, monetary: Math.round(s.money * 100) / 100,
+      R, F, M, segment,
+    }
+  })
+  const groups = {}
+  rows.forEach((r) => { groups[r.segment] = (groups[r.segment] || 0) + 1 })
+  res.json({ code: 200, data: { rows, groups, total: rows.length } })
+})
+
+// ---------- 审批中心 ----------
+// 提交审批（采购单/报销单/付款）
+app.post('/api/approval/submit', authRequired, adminRequired, async (req, res) => {
+  const { type, relatedId, relatedNo, amount, title } = req.body || {}
+  if (!['采购单', '费用报销', '付款'].includes(type)) return res.status(400).json({ code: 400, message: '审批类型不支持' })
+  const exists = (await store.all('approvals')).find((a) => a.relatedId === relatedId && a.status === '待审批')
+  if (exists) return res.status(400).json({ code: 400, message: '该单据已有待审批申请' })
+  const rec = await store.create('approvals', {
+    type, relatedId: relatedId || '', relatedNo: relatedNo || '',
+    title: title || `${type} ${relatedNo || ''}`,
+    amount: Number(amount || 0),
+    status: '待审批',
+    applicant: req.user?.name || req.user?.username || '系统',
+    approver: '', approvedAt: '', comment: '',
+  })
+  res.json({ code: 200, message: '审批已提交', data: rec })
+})
+
+// 审批：通过或驳回（通过触发业务动作）
+app.post('/api/approval/decide/:id', authRequired, adminRequired, async (req, res) => {
+  const { decision, comment } = req.body || {}
+  if (!['通过', '驳回'].includes(decision)) return res.status(400).json({ code: 400, message: '决策必须是通过或驳回' })
+  const rec = await store.find('approvals', req.params.id)
+  if (!rec) return res.status(404).json({ code: 404, message: '审批单不存在' })
+  if (rec.status !== '待审批') return res.status(400).json({ code: 400, message: '该审批已处理' })
+  const patch = {
+    status: decision, approver: req.user?.name || req.user?.username || '系统',
+    approvedAt: new Date().toISOString().slice(0, 10), comment: comment || '',
+  }
+  // 通过时联动业务单据状态
+  if (decision === '通过') {
+    if (rec.type === '采购单' && rec.relatedId) await store.update('purchaseOrders', rec.relatedId, { status: '待入库' })
+    if (rec.type === '费用报销' && rec.relatedId) await store.update('expenses', rec.relatedId, { status: '待付款' })
+  }
+  await store.update('approvals', rec.id, patch)
+  res.json({ code: 200, message: `审批已${decision}` })
+})
+
+// ---------- 费用报销 ----------
+app.post('/api/expense/submit-approval/:id', authRequired, adminRequired, async (req, res) => {
+  const exp = await store.find('expenses', req.params.id)
+  if (!exp) return res.status(404).json({ code: 404, message: '报销单不存在' })
+  if (exp.status !== '草稿') return res.status(400).json({ code: 400, message: '只有草稿可提交审批' })
+  const exists = (await store.all('approvals')).find((a) => a.relatedId === exp.id && a.status === '待审批')
+  if (exists) return res.status(400).json({ code: 400, message: '已有待审批申请' })
+  await store.create('approvals', {
+    type: '费用报销', relatedId: exp.id, relatedNo: exp.expenseNo || '',
+    title: `费用报销 ${exp.expenseNo || ''} ${exp.category || ''}`,
+    amount: Number(exp.amount || 0), status: '待审批',
+    applicant: req.user?.name || req.user?.username || '系统',
+    approver: '', approvedAt: '', comment: '',
+  })
+  await store.update('expenses', exp.id, { status: '审批中' })
+  res.json({ code: 200, message: '报销已提交审批' })
+})
+
+// 报销付款确认
+app.post('/api/expense/pay/:id', authRequired, adminRequired, async (req, res) => {
+  const exp = await store.find('expenses', req.params.id)
+  if (!exp) return res.status(404).json({ code: 404, message: '报销单不存在' })
+  if (exp.status !== '待付款') return res.status(400).json({ code: 400, message: '该报销单状态不是待付款' })
+  await store.update('expenses', exp.id, { status: '已付款', paidAt: new Date().toISOString().slice(0, 10) })
+  await store.create('payments', {
+    direction: '付款', relatedNo: exp.expenseNo || '', party: exp.applicant || '员工报销',
+    amount: Number(exp.amount || 0), method: '现金', date: new Date().toISOString().slice(0, 10),
+    note: `费用报销 ${exp.category || ''}`, orderId: '',
+  })
+  res.json({ code: 200, message: '报销已付款，资金流水已记录' })
+})
+
+// ---------- 发票管理 ----------
+app.post('/api/invoice/issue', authRequired, adminRequired, async (req, res) => {
+  const inv = await store.find('invoices', req.body?.id)
+  if (!inv) return res.status(404).json({ code: 404, message: '发票不存在' })
+  if (inv.status === '已开票') return res.status(400).json({ code: 400, message: '该发票已开具' })
+  await store.update('invoices', inv.id, { status: '已开票', issuedAt: new Date().toISOString().slice(0, 10) })
+  res.json({ code: 200, message: '发票已标记开具' })
+})
+
+// ---------- 库位管理 ----------
+// 从仓库生成库位（按区域/货架/层批量生成编码）
+app.post('/api/location/generate', authRequired, adminRequired, async (req, res) => {
+  const { warehouseId, warehouseName, zones, racksPerZone, levelsPerRack } = req.body || {}
+  const zonesCount = Math.max(1, Number(zones || 1))
+  const racks = Math.max(1, Number(racksPerZone || 2))
+  const levels = Math.max(1, Number(levelsPerRack || 3))
+  const existing = await store.all('locations')
+  let added = 0
+  for (let z = 1; z <= zonesCount; z++) {
+    for (let r = 1; r <= racks; r++) {
+      for (let l = 1; l <= levels; l++) {
+        const code = `${String(z).padStart(2, '0')}-${String(r).padStart(2, '0')}-${String(l).padStart(2, '0')}`
+        if (existing.some((x) => x.warehouseId === warehouseId && x.code === code)) continue
+        await store.create('locations', {
+          code, warehouseId: warehouseId || '', warehouseName: warehouseName || '',
+          zone: `A${z}`, rack: r, level: l, status: '空闲',
+        })
+        added++
+      }
+    }
+  }
+  res.json({ code: 200, message: `已生成 ${added} 个库位`, data: { added } })
+})
+
+// ---------- 销售预测 ----------
+// 基于近12个月月度趋势：线性回归 + 移动平均结合，预测未来3个月
+app.get('/api/forecast/sales', authRequired, adminRequired, async (req, res) => {
+  const [sales, products] = await Promise.all([store.all('salesOrders'), store.all('products')])
+  const now = new Date()
+  const months = []
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+  }
+  const actual = months.map((m) => ({
+    month: m,
+    revenue: Math.round(sales.filter((o) => (o.orderDate || '').startsWith(m) && o.status !== '已取消').reduce((s, o) => s + Number(o.total || 0), 0) * 100) / 100,
+    orders: sales.filter((o) => (o.orderDate || '').startsWith(m) && o.status !== '已取消').length,
+  }))
+  const values = actual.map((a) => a.revenue)
+  // 线性回归 y = a + b*x
+  const n = values.length
+  const xs = values.map((_, i) => i + 1)
+  const mx = xs.reduce((s, x) => s + x, 0) / n
+  const my = values.reduce((s, y) => s + y, 0) / n
+  const b = xs.reduce((s, x, i) => s + (x - mx) * (values[i] - my), 0) / (xs.reduce((s, x) => s + (x - mx) ** 2, 0) || 1)
+  const a = my - b * mx
+  const ma3 = values.slice(-3).reduce((s, v) => s + v, 0) / 3
+  const forecasts = [1, 2, 3].map((k) => {
+    const d = new Date(now.getFullYear(), now.getMonth() + k, 1)
+    const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const linear = Math.max(0, a + b * (n + k))
+    const predicted = Math.round((linear * 0.6 + ma3 * 0.4) * 100) / 100
+    return { month, predicted, method: '线性回归60%+移动平均40%' }
+  })
+  const totalPredicted = Math.round(forecasts.reduce((s, f) => s + f.predicted, 0) * 100) / 100
+  res.json({ code: 200, data: { actual, forecasts, totalPredicted, trend: b >= 0 ? '上升' : '下降' } })
 })
 
 // ---------- 收付款管理（应收应付 + 核销） ----------

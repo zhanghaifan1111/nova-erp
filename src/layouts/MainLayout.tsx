@@ -27,6 +27,7 @@ const adminMenu = [
       { key: '/warehouses', label: '仓库管理' },
       { key: '/stock-transfers', label: '库存调拨' },
       { key: '/warehouse-fx', label: '拣货单 · 汇率' },
+      { key: '/warehouse-intel', label: '库位 · 销售预测' },
     ],
   },
   {
@@ -55,6 +56,14 @@ const adminMenu = [
       { key: '/payments', label: '收付款管理' },
       { key: '/profit', label: '利润核算' },
       { key: '/pricing', label: '定价计算器' },
+      { key: '/compliance', label: '发票 · 操作审计' },
+    ],
+  },
+  {
+    key: 'grp-workflow', icon: <SafetyCertificateOutlined />, label: '智能与管控',
+    children: [
+      { key: '/intelligence', label: '智能决策中心' },
+      { key: '/workflow', label: '审批中心 · 报销' },
     ],
   },
   { type: 'divider' as const },
@@ -93,14 +102,17 @@ const titleMap: Record<string, string> = {
   '/api-integration': 'API 对接 · 订单推送',
   '/stock-flow': '入库盘点退货', '/data-io': '数据导入导出',
   '/payments': '收付款管理', '/crm': '客户跟进 CRM', '/warehouse-fx': '拣货单 · 汇率管理',
+  '/intelligence': '智能决策中心', '/workflow': '审批中心 · 费用报销',
+  '/compliance': '发票 · 操作审计', '/warehouse-intel': '库位 · 销售预测',
 }
 
 const groupKeys: Record<string, string> = {
   '/products': 'grp-product', '/sourcing': 'grp-product', '/listings': 'grp-product',
-  '/inventory': 'grp-product', '/stock-flow': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product', '/warehouse-fx': 'grp-product',
+  '/inventory': 'grp-product', '/stock-flow': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product', '/warehouse-fx': 'grp-product', '/warehouse-intel': 'grp-product',
   '/sales': 'grp-order', '/purchase': 'grp-order', '/shipments': 'grp-order', '/labels': 'grp-order', '/order-sync': 'grp-order',
   '/shops': 'grp-cross', '/shipping-methods': 'grp-cross', '/shipping-templates': 'grp-cross', '/messages': 'grp-cross',
-  '/finance': 'grp-finance', '/payments': 'grp-finance', '/profit': 'grp-finance', '/pricing': 'grp-finance',
+  '/finance': 'grp-finance', '/payments': 'grp-finance', '/profit': 'grp-finance', '/pricing': 'grp-finance', '/compliance': 'grp-finance',
+  '/intelligence': 'grp-workflow', '/workflow': 'grp-workflow',
   '/accounts': 'grp-account', '/customer-accounts': 'grp-account', '/profile': 'grp-account',
   '/api-integration': 'grp-account', '/data-io': 'grp-account',
 }

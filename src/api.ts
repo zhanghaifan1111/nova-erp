@@ -77,6 +77,16 @@ export const api = {
   pickFromOrder: (orderId: string) => request('/wms/pick-from-order/' + orderId, { method: 'POST' }),
   pickConfirm: (id: string) => request('/wms/pick-confirm/' + id, { method: 'POST' }),
   fxConvert: (currency: string, amount: number) => request('/fx/convert', { method: 'POST', body: JSON.stringify({ currency, amount }) }),
+  replenishSuggest: (leadDays?: number, safetyDays?: number) => request(`/replenish/suggest?leadDays=${leadDays || 7}&safetyDays=${safetyDays ?? 7}`),
+  replenishToPurchase: (items: any[], supplierName?: string) => request('/replenish/to-purchase', { method: 'POST', body: JSON.stringify({ items, supplierName }) }),
+  rfmAnalyze: () => request('/rfm/analyze'),
+  approvalSubmit: (body: any) => request('/approval/submit', { method: 'POST', body: JSON.stringify(body) }),
+  approvalDecide: (id: string, decision: string, comment?: string) => request('/approval/decide/' + id, { method: 'POST', body: JSON.stringify({ decision, comment }) }),
+  expenseSubmitApproval: (id: string) => request('/expense/submit-approval/' + id, { method: 'POST' }),
+  expensePay: (id: string) => request('/expense/pay/' + id, { method: 'POST' }),
+  invoiceIssue: (id: string) => request('/invoice/issue', { method: 'POST', body: JSON.stringify({ id }) }),
+  locationGenerate: (body: any) => request('/location/generate', { method: 'POST', body: JSON.stringify(body) }),
+  forecastSales: () => request('/forecast/sales'),
   health: () => request('/health'),
 }
 
