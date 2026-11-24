@@ -26,6 +26,7 @@ export const COLLECTIONS = [
   'receipts', 'stockChecks', 'returns',
   'payments', 'followUps', 'pickLists', 'exchangeRates',
   'approvals', 'expenses', 'invoices', 'auditLogs', 'locations',
+  'glAccounts', 'vouchers', 'settlements', 'kpiTargets',
   'users',
 ]
 const BUSINESS_COLLECTIONS = [
@@ -37,6 +38,7 @@ const BUSINESS_COLLECTIONS = [
   'receipts', 'stockChecks', 'returns',
   'payments', 'followUps', 'pickLists', 'exchangeRates',
   'approvals', 'expenses', 'invoices', 'auditLogs', 'locations',
+  'glAccounts', 'vouchers', 'settlements', 'kpiTargets',
 ]
 
 function emptyDb() {

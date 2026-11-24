@@ -87,6 +87,13 @@ export const api = {
   invoiceIssue: (id: string) => request('/invoice/issue', { method: 'POST', body: JSON.stringify({ id }) }),
   locationGenerate: (body: any) => request('/location/generate', { method: 'POST', body: JSON.stringify(body) }),
   forecastSales: () => request('/forecast/sales'),
+  glInitAccounts: () => request('/gl/init-accounts', { method: 'POST' }),
+  glVoucher: (body: any) => request('/gl/voucher', { method: 'POST', body: JSON.stringify(body) }),
+  glBalance: () => request('/gl/balance'),
+  settleReconcile: (rows: any[]) => request('/settle/reconcile', { method: 'POST', body: JSON.stringify({ rows }) }),
+  kpiAttainment: (month?: string) => request('/kpi/attainment?month=' + (month || new Date().toISOString().slice(0, 7))),
+  alertsAll: () => request('/alerts/all'),
+  inventoryAging: () => request('/inventory/aging'),
   health: () => request('/health'),
 }
 

@@ -184,6 +184,7 @@ const COLLECTIONS = [
   'receipts', 'stockChecks', 'returns',
   'payments', 'followUps', 'pickLists', 'exchangeRates',
   'approvals', 'expenses', 'invoices', 'auditLogs', 'locations',
+  'glAccounts', 'vouchers', 'settlements', 'kpiTargets',
 ]
 
 function scopeRows(req, key, rows) {
@@ -428,6 +429,220 @@ app.post('/api/messages/:id/reply', authRequired, async (req, res) => {
   replies.push({ content: String(content).trim(), at: new Date().toISOString(), by: req.user?.name || req.user?.username || '系统' })
   const rec = await store.update('messages', msg.id, { status: '已回复', replies, repliedAt: new Date().toISOString().slice(0, 10) })
   res.json({ code: 200, message: '回复成功', data: rec })
+})
+
+// ---------- 会计总账 ----------
+// 初始化科目表（中国会计准则常用科目）
+app.post('/api/gl/init-accounts', authRequired, adminRequired, async (req, res) => {
+  const existing = await store.all('glAccounts')
+  const defaults = [
+    { code: '1001', name: '库存现金', type: '资产', direction: '借' },
+    { code: '1002', name: '银行存款', type: '资产', direction: '借' },
+    { code: '1122', name: '应收账款', type: '资产', direction: '借' },
+    { code: '1405', name: '库存商品', type: '资产', direction: '借' },
+    { code: '2202', name: '应付账款', type: '负债', direction: '贷' },
+    { code: '2211', name: '应付职工薪酬', type: '负债', direction: '贷' },
+    { code: '2221', name: '应交税费', type: '负债', direction: '贷' },
+    { code: '4001', name: '实收资本', type: '所有者权益', direction: '贷' },
+    { code: '5001', name: '主营业务收入', type: '损益', direction: '贷' },
+    { code: '5401', name: '主营业务成本', type: '损益', direction: '借' },
+    { code: '5601', name: '销售费用', type: '损益', direction: '借' },
+    { code: '5602', name: '管理费用', type: '损益', direction: '借' },
+  ]
+  let added = 0
+  for (const a of defaults) {
+    if (existing.some((x) => x.code === a.code)) continue
+    await store.create('glAccounts', { ...a, status: '启用' })
+    added++
+  }
+  res.json({ code: 200, message: `已初始化 ${added} 个会计科目`, data: { added } })
+})
+
+// 记账凭证：借贷必须平衡
+app.post('/api/gl/voucher', authRequired, adminRequired, async (req, res) => {
+  const { voucherNo, date, summary, lines } = req.body || {}
+  if (!Array.isArray(lines) || lines.length < 2) return res.status(400).json({ code: 400, message: '凭证至少要有两条分录' })
+  const debit = lines.reduce((s, l) => s + Number(l.debit || 0), 0)
+  const credit = lines.reduce((s, l) => s + Number(l.credit || 0), 0)
+  if (Math.abs(debit - credit) > 0.01) {
+    return res.status(400).json({ code: 400, message: `借贷不平衡：借方 ${debit.toFixed(2)} ≠ 贷方 ${credit.toFixed(2)}` })
+  }
+  if (lines.some((l) => !l.accountCode || (Number(l.debit || 0) === 0 && Number(l.credit || 0) === 0))) {
+    return res.status(400).json({ code: 400, message: '分录必须有科目且借贷金额不能同时为 0' })
+  }
+  const rec = await store.create('vouchers', {
+    voucherNo: voucherNo || 'PZ-' + Date.now().toString().slice(-8),
+    date: date || new Date().toISOString().slice(0, 10),
+    summary: summary || '',
+    lines: lines.map((l) => ({
+      accountCode: l.accountCode, accountName: l.accountName || '',
+      summary: l.summary || '', debit: Number(l.debit || 0), credit: Number(l.credit || 0),
+    })),
+    total: Math.round(debit * 100) / 100,
+    status: '已记账', source: '手工录入',
+    createdBy: req.user?.name || req.user?.username || '系统',
+  })
+  res.json({ code: 200, message: '凭证已记账（借贷平衡）', data: rec })
+})
+
+// 科目余额表：按科目汇总借贷发生额与余额
+app.get('/api/gl/balance', authRequired, adminRequired, async (req, res) => {
+  const [accounts, vouchers] = await Promise.all([store.all('glAccounts'), store.all('vouchers')])
+  const rows = accounts.map((acc) => {
+    let debit = 0, credit = 0
+    vouchers.filter((v) => v.status === '已记账').forEach((v) => {
+      (v.lines || []).filter((l) => l.accountCode === acc.code).forEach((l) => {
+        debit += Number(l.debit || 0)
+        credit += Number(l.credit || 0)
+      })
+    })
+    const balance = acc.direction === '借' ? debit - credit : credit - debit
+    return { code: acc.code, name: acc.name, type: acc.type, direction: acc.direction, debit, credit, balance }
+  })
+  const totalDebit = rows.reduce((s, r) => s + r.debit, 0)
+  const totalCredit = rows.reduce((s, r) => s + r.credit, 0)
+  res.json({
+    code: 200,
+    data: {
+      rows,
+      totalDebit: Math.round(totalDebit * 100) / 100,
+      totalCredit: Math.round(totalCredit * 100) / 100,
+      balanced: Math.abs(totalDebit - totalCredit) < 0.01,
+    },
+  })
+})
+
+// ---------- 平台结算对账 ----------
+// 导入平台结算单并按订单号与系统销售订单核对
+app.post('/api/settle/reconcile', authRequired, adminRequired, async (req, res) => {
+  const { rows } = req.body || {}
+  if (!Array.isArray(rows) || !rows.length) return res.status(400).json({ code: 400, message: '请提供结算单数据' })
+  const sales = await store.all('salesOrders')
+  const existing = await store.all('settlements')
+  const seen = new Set(existing.map((s) => s.settlementNo).filter(Boolean))
+  let added = 0, skipped = 0
+  for (const row of rows) {
+    const no = String(row.settlementNo || row.orderNo || '').trim()
+    if (!no || seen.has(no)) { skipped++; continue }
+    seen.add(no)
+    const orderNo = String(row.orderNo || '').trim()
+    const order = sales.find((o) => o.orderNo === orderNo)
+    const salesAmount = Number(row.salesAmount || 0)
+    const commission = Number(row.commission || 0)
+    const adFee = Number(row.adFee || 0)
+    const refund = Number(row.refund || 0)
+    const actual = Number(row.actualAmount ?? (salesAmount - commission - adFee - refund))
+    const systemAmount = order ? Number(order.total || 0) : 0
+    // 对账差异 = 系统订单金额 − 平台销售额（佣金/广告/退款是平台正常扣费，不算差异）
+    const diff = order ? Math.round((systemAmount - salesAmount) * 100) / 100 : null
+    await store.create('settlements', {
+      settlementNo: no, orderNo,
+      platform: row.platform || order?.shopName || '',
+      shopName: row.shopName || order?.shopName || '',
+      salesAmount, commission, adFee, refund, actualAmount: actual,
+      systemAmount, diff,
+      status: !order ? '未匹配' : Math.abs(diff) < 0.01 ? '已对平' : '有差异',
+      settleDate: row.settleDate || new Date().toISOString().slice(0, 10),
+      remark: row.remark || '',
+    })
+    added++
+  }
+  res.json({ code: 200, message: `对账完成：新增 ${added}，跳过 ${skipped}`, data: { added, skipped } })
+})
+
+// ---------- KPI 目标 ----------
+// 达成率：目标 vs 实际（按月份，可按店铺过滤）
+app.get('/api/kpi/attainment', authRequired, adminRequired, async (req, res) => {
+  const [targets, sales] = await Promise.all([store.all('kpiTargets'), store.all('salesOrders')])
+  const month = String(req.query.month || new Date().toISOString().slice(0, 7))
+  const rows = targets.filter((t) => (t.month || '') === month).map((t) => {
+    const actual = sales.filter((o) => {
+      if (!(o.orderDate || '').startsWith(month) || o.status === '已取消') return false
+      if (t.shopId && o.shopId !== t.shopId) return false
+      return true
+    }).reduce((s, o) => s + Number(o.total || 0), 0)
+    const target = Number(t.target || 0)
+    const rate = target > 0 ? Math.round((actual / target) * 10000) / 100 : 0
+    return {
+      targetId: t.id, month, scope: t.shopName || '整体',
+      target, actual: Math.round(actual * 100) / 100, rate,
+      gap: Math.round((actual - target) * 100) / 100,
+      status: rate >= 100 ? '达成' : rate >= 80 ? '接近' : '未达成',
+    }
+  })
+  res.json({ code: 200, data: { rows, month } })
+})
+
+// ---------- 统一预警中心 ----------
+// 聚合：低库存 / 逾期应收 / 待审批 / 跟进逾期 / 未对平结算
+app.get('/api/alerts/all', authRequired, adminRequired, async (req, res) => {
+  const [products, payments, approvals, followUps, settlements] = await Promise.all([
+    store.all('products'), store.all('payments'), store.all('approvals'), store.all('followUps'), store.all('settlements'),
+  ])
+  const alerts = []
+  // 低库存
+  products.filter((p) => Number(p.stock || 0) <= Number(p.safeStock || 0)).forEach((p) => {
+    alerts.push({ level: '高', type: '库存预警', title: `${p.sku} ${p.name} 库存不足`, detail: `当前 ${p.stock}，安全库存 ${p.safeStock}`, link: '/inventory' })
+  })
+  // 逾期应收：销售订单超过30天未结清
+  const [sales] = await Promise.all([store.all('salesOrders')])
+  sales.filter((o) => o.status !== '已取消').forEach((o) => {
+    const received = payments.filter((p) => p.direction === '收款' && p.relatedNo === o.orderNo).reduce((s, p) => s + Number(p.amount || 0), 0)
+    const balance = Number(o.total || 0) - received
+    const days = o.orderDate ? Math.floor((Date.now() - new Date(o.orderDate)) / 86400000) : 0
+    if (balance > 0 && days > 30) alerts.push({ level: '高', type: '逾期应收', title: `${o.orderNo} 逾期未收`, detail: `未收 ¥${balance.toFixed(2)}，已过 ${days} 天`, link: '/payments' })
+  })
+  // 待审批
+  const pending = approvals.filter((a) => a.status === '待审批').length
+  if (pending) alerts.push({ level: '中', type: '审批待办', title: `${pending} 条审批待处理`, detail: '请到审批中心处理', link: '/workflow' })
+  // 跟进逾期
+  const today = new Date().toISOString().slice(0, 10)
+  const overdue = followUps.filter((f) => f.nextDate && f.nextDate < today && !['已成交', '已流失'].includes(f.stage)).length
+  if (overdue) alerts.push({ level: '中', type: '客户跟进', title: `${overdue} 条跟进已逾期`, detail: '尽快联系客户避免流失', link: '/crm' })
+  // 结算差异
+  const diff = settlements.filter((s) => s.status === '有差异' || s.status === '未匹配').length
+  if (diff) alerts.push({ level: '中', type: '对账差异', title: `${diff} 条结算有差异`, detail: '请核对平台结算单', link: '/reconcile' })
+  const order = { 高: 0, 中: 1, 低: 2 }
+  alerts.sort((a, b) => order[a.level] - order[b.level])
+  res.json({ code: 200, data: { rows: alerts, total: alerts.length, byLevel: { 高: alerts.filter((a) => a.level === '高').length, 中: alerts.filter((a) => a.level === '中').length } } })
+})
+
+// ---------- 库龄分析 ----------
+// 按商品入库批次时间分档：0-30/31-60/61-90/90+ 天，标记呆滞
+app.get('/api/inventory/aging', authRequired, adminRequired, async (req, res) => {
+  const [products, stockLogs, purchases] = await Promise.all([store.all('products'), store.all('stockLogs'), store.all('purchaseOrders')])
+  const now = Date.now()
+  const rows = products.map((p) => {
+    const stock = Number(p.stock || 0)
+    // 找最近一次入库时间：优先采购单到货，其次入库流水
+    let lastIn = p.createdAt || ''
+    stockLogs.filter((l) => l.type === '入库' && l.productId === p.id && l.createdAt).forEach((l) => {
+      if (l.createdAt > lastIn) lastIn = l.createdAt
+    })
+    purchases.filter((o) => ['已完成', '待入库'].includes(o.status)).forEach((o) => {
+      (o.items || []).filter((it) => it.productId === p.id && o.orderDate && o.orderDate > lastIn).forEach(() => { lastIn = o.orderDate })
+    })
+    const age = lastIn ? Math.floor((now - new Date(lastIn)) / 86400000) : 0
+    const bucket = age <= 30 ? '0-30天' : age <= 60 ? '31-60天' : age <= 90 ? '61-90天' : '90天以上'
+    const amount = Math.round(stock * Number(p.costPrice || 0) * 100) / 100
+    return {
+      productId: p.id, sku: p.sku, name: p.name, stock,
+      costPrice: Number(p.costPrice || 0), amount,
+      lastIn: lastIn ? lastIn.slice(0, 10) : '-', age, bucket,
+      stagnant: age > 90 && stock > 0,
+    }
+  }).filter((r) => r.stock > 0)
+  const summary = {}
+  rows.forEach((r) => { summary[r.bucket] = (summary[r.bucket] || 0) + r.amount })
+  res.json({
+    code: 200,
+    data: {
+      rows: rows.sort((a, b) => b.age - a.age),
+      summary,
+      stagnantCount: rows.filter((r) => r.stagnant).length,
+      stagnantAmount: Math.round(rows.filter((r) => r.stagnant).reduce((s, r) => s + r.amount, 0) * 100) / 100,
+    },
+  })
 })
 
 // ---------- 智能补货建议 ----------

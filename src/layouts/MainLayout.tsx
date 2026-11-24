@@ -7,6 +7,7 @@ import {
   MoonOutlined, SunOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
   BellOutlined, SettingOutlined, SafetyCertificateOutlined, UserOutlined,
   LogoutOutlined, KeyOutlined, DownOutlined, GlobalOutlined,
+  FundProjectionScreenOutlined, AuditOutlined, CheckSquareOutlined,
 } from '@ant-design/icons'
 import { useAppTheme } from '../theme'
 import { useAuth } from '../auth'
@@ -16,6 +17,7 @@ const { Header, Sider, Content } = Layout
 
 const adminMenu = [
   { key: '/', icon: <DashboardOutlined />, label: '经营总览' },
+  { key: '/command-center', icon: <FundProjectionScreenOutlined />, label: '经营驾驶舱' },
   {
     key: 'grp-product', icon: <AppstoreOutlined />, label: '商品与库存',
     children: [
@@ -57,6 +59,8 @@ const adminMenu = [
       { key: '/profit', label: '利润核算' },
       { key: '/pricing', label: '定价计算器' },
       { key: '/compliance', label: '发票 · 操作审计' },
+      { key: '/gl', label: '会计总账' },
+      { key: '/reconciliation', label: '平台结算对账' },
     ],
   },
   {
@@ -64,6 +68,7 @@ const adminMenu = [
     children: [
       { key: '/intelligence', label: '智能决策中心' },
       { key: '/workflow', label: '审批中心 · 报销' },
+      { key: '/performance', label: 'KPI · 预警中心' },
     ],
   },
   { type: 'divider' as const },
@@ -104,6 +109,8 @@ const titleMap: Record<string, string> = {
   '/payments': '收付款管理', '/crm': '客户跟进 CRM', '/warehouse-fx': '拣货单 · 汇率管理',
   '/intelligence': '智能决策中心', '/workflow': '审批中心 · 费用报销',
   '/compliance': '发票 · 操作审计', '/warehouse-intel': '库位 · 销售预测',
+  '/command-center': '经营驾驶舱', '/gl': '会计总账', '/reconciliation': '平台结算对账',
+  '/performance': 'KPI 目标 · 预警中心',
 }
 
 const groupKeys: Record<string, string> = {
@@ -112,7 +119,8 @@ const groupKeys: Record<string, string> = {
   '/sales': 'grp-order', '/purchase': 'grp-order', '/shipments': 'grp-order', '/labels': 'grp-order', '/order-sync': 'grp-order',
   '/shops': 'grp-cross', '/shipping-methods': 'grp-cross', '/shipping-templates': 'grp-cross', '/messages': 'grp-cross',
   '/finance': 'grp-finance', '/payments': 'grp-finance', '/profit': 'grp-finance', '/pricing': 'grp-finance', '/compliance': 'grp-finance',
-  '/intelligence': 'grp-workflow', '/workflow': 'grp-workflow',
+  '/gl': 'grp-finance', '/reconciliation': 'grp-finance',
+  '/intelligence': 'grp-workflow', '/workflow': 'grp-workflow', '/performance': 'grp-workflow',
   '/accounts': 'grp-account', '/customer-accounts': 'grp-account', '/profile': 'grp-account',
   '/api-integration': 'grp-account', '/data-io': 'grp-account',
 }

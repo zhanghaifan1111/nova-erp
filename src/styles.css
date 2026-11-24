@@ -183,3 +183,6 @@ body {
   }
   .print-toolbar { display: none !important; }
 }
+
+/* 高优先级预警行 */
+.row-alert-high td { background: rgba(240,68,56,.06); }

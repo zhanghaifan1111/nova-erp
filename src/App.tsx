@@ -39,6 +39,10 @@ const Intelligence = lazy(() => import('./pages/Intelligence'))
 const Workflow = lazy(() => import('./pages/Workflow'))
 const Compliance = lazy(() => import('./pages/Compliance'))
 const WarehouseIntel = lazy(() => import('./pages/WarehouseIntel'))
+const Gl = lazy(() => import('./pages/Gl'))
+const Reconciliation = lazy(() => import('./pages/Reconciliation'))
+const Performance = lazy(() => import('./pages/Performance'))
+const CommandCenter = lazy(() => import('./pages/CommandCenter'))
 
 const Loading = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>
@@ -98,6 +102,10 @@ export default function App() {
           <Route path="/workflow" element={<AdminOnly><Workflow /></AdminOnly>} />
           <Route path="/compliance" element={<AdminOnly><Compliance /></AdminOnly>} />
           <Route path="/warehouse-intel" element={<AdminOnly><WarehouseIntel /></AdminOnly>} />
+          <Route path="/gl" element={<AdminOnly><Gl /></AdminOnly>} />
+          <Route path="/reconciliation" element={<AdminOnly><Reconciliation /></AdminOnly>} />
+          <Route path="/performance" element={<AdminOnly><Performance /></AdminOnly>} />
+          <Route path="/command-center" element={<AdminOnly><CommandCenter /></AdminOnly>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
