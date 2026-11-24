@@ -24,6 +24,7 @@ export const COLLECTIONS = [
   'apiEndpoints', 'pushLogs',
   'cartons', 'waybills', 'printTemplates',
   'receipts', 'stockChecks', 'returns',
+  'payments', 'followUps', 'pickLists', 'exchangeRates',
   'users',
 ]
 const BUSINESS_COLLECTIONS = [
@@ -33,6 +34,7 @@ const BUSINESS_COLLECTIONS = [
   'apiEndpoints', 'pushLogs',
   'cartons', 'waybills', 'printTemplates',
   'receipts', 'stockChecks', 'returns',
+  'payments', 'followUps', 'pickLists', 'exchangeRates',
 ]
 
 function emptyDb() {

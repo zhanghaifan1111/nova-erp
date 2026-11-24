@@ -71,6 +71,12 @@ export const api = {
   returnConfirm: (id: string) => request('/stock/return-confirm/' + id, { method: 'POST' }),
   importRows: (key: string, rows: any[]) => request('/import', { method: 'POST', body: JSON.stringify({ key, rows }) }),
   exportRows: (key: string) => request<{ code: number; data: any[] }>('/export/' + key),
+  paymentsLedger: () => request<{ code: number; data: { rows: any[]; sum: any } }>('/payment-ledger'),
+  paymentRecord: (body: any) => request('/payment-record', { method: 'POST', body: JSON.stringify(body) }),
+  followUp: (body: any) => request('/crm/follow-up', { method: 'POST', body: JSON.stringify(body) }),
+  pickFromOrder: (orderId: string) => request('/wms/pick-from-order/' + orderId, { method: 'POST' }),
+  pickConfirm: (id: string) => request('/wms/pick-confirm/' + id, { method: 'POST' }),
+  fxConvert: (currency: string, amount: number) => request('/fx/convert', { method: 'POST', body: JSON.stringify({ currency, amount }) }),
   health: () => request('/health'),
 }
 

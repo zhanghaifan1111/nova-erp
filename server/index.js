@@ -158,6 +158,7 @@ const COLLECTIONS = [
   'apiEndpoints', 'pushLogs',
   'cartons', 'waybills', 'printTemplates',
   'receipts', 'stockChecks', 'returns',
+  'payments', 'followUps', 'pickLists', 'exchangeRates',
 ]
 
 function scopeRows(req, key, rows) {
@@ -402,6 +403,140 @@ app.post('/api/messages/:id/reply', authRequired, async (req, res) => {
   replies.push({ content: String(content).trim(), at: new Date().toISOString(), by: req.user?.name || req.user?.username || '系统' })
   const rec = await store.update('messages', msg.id, { status: '已回复', replies, repliedAt: new Date().toISOString().slice(0, 10) })
   res.json({ code: 200, message: '回复成功', data: rec })
+})
+
+// ---------- 收付款管理（应收应付 + 核销） ----------
+// 应收款/应付款台账：从未结清的订单计算
+app.get('/api/payment-ledger', authRequired, adminRequired, async (req, res) => {
+  const [sales, purchases, payments] = await Promise.all([
+    store.all('salesOrders'), store.all('purchaseOrders'), store.all('payments'),
+  ])
+  const receivedBy = (no) => payments.filter((p) => p.direction === '收款' && p.relatedNo === no).reduce((s, p) => s + Number(p.amount || 0), 0)
+  const paidBy = (no) => payments.filter((p) => p.direction === '付款' && p.relatedNo === no).reduce((s, p) => s + Number(p.amount || 0), 0)
+  const receivable = sales
+    .filter((o) => o.status !== '已取消')
+    .map((o) => {
+      const total = Number(o.total || 0), received = receivedBy(o.orderNo)
+      return {
+        type: '应收', relatedNo: o.orderNo, party: o.customerName || '',
+        total, settled: received, balance: Math.max(0, Math.round((total - received) * 100) / 100),
+        orderId: o.id, date: o.orderDate || '',
+      }
+    })
+    .filter((r) => r.balance > 0)
+  const payable = purchases
+    .filter((o) => o.status !== '已取消')
+    .map((o) => {
+      const total = Number(o.total || 0), paid = paidBy(o.orderNo)
+      return {
+        type: '应付', relatedNo: o.orderNo, party: o.supplierName || '',
+        total, settled: paid, balance: Math.max(0, Math.round((total - paid) * 100) / 100),
+        orderId: o.id, date: o.orderDate || '',
+      }
+    })
+    .filter((r) => r.balance > 0)
+  res.json({
+    code: 200,
+    data: {
+      rows: [...receivable, ...payable],
+      sum: {
+        receivable: Math.round(receivable.reduce((s, r) => s + r.balance, 0) * 100) / 100,
+        payable: Math.round(payable.reduce((s, r) => s + r.balance, 0) * 100) / 100,
+      },
+    },
+  })
+})
+
+// 登记收款/付款（核销到订单，支持部分收付）
+app.post('/api/payment-record', authRequired, adminRequired, async (req, res) => {
+  const { direction, relatedNo, amount, method, date, note } = req.body || {}
+  if (!['收款', '付款'].includes(direction)) return res.status(400).json({ code: 400, message: '方向必须是收款或付款' })
+  const amt = Number(amount || 0)
+  if (amt <= 0) return res.status(400).json({ code: 400, message: '金额必须大于 0' })
+  const collection = direction === '收款' ? 'salesOrders' : 'purchaseOrders'
+  const field = direction === '收款' ? 'customerName' : 'supplierName'
+  const order = (await store.all(collection)).find((o) => o.orderNo === relatedNo)
+  if (!order) return res.status(404).json({ code: 404, message: '关联订单不存在' })
+  const rec = await store.create('payments', {
+    direction, relatedNo, party: order[field] || '',
+    amount: amt, method: method || '银行转账', date: date || new Date().toISOString().slice(0, 10),
+    note: note || '', orderId: order.id,
+  })
+  // 回写订单已收/已付金额与状态
+  const key = direction === '收款' ? 'paidAmount' : 'paidAmount'
+  const all = await store.all('payments')
+  const settled = all.filter((p) => p.direction === direction && p.relatedNo === relatedNo).reduce((s, p) => s + Number(p.amount || 0), 0)
+  const total = Number(order.total || 0)
+  const patch = { [key]: Math.round(settled * 100) / 100 }
+  if (settled >= total) patch.status = direction === '收款' ? '已完成' : '已完成'
+  else if (settled > 0) patch.status = direction === '收款' ? '部分收款' : '部分付款'
+  await store.update(collection, order.id, patch)
+  res.json({ code: 200, message: `${direction}登记成功`, data: rec })
+})
+
+// ---------- 客户跟进 CRM ----------
+// 新增跟进：同时更新客户的最新跟进与下次跟进日期
+app.post('/api/crm/follow-up', authRequired, adminRequired, async (req, res) => {
+  const { customerId, stage, method, content, result, nextDate } = req.body || {}
+  if (!customerId) return res.status(400).json({ code: 400, message: '请选择客户' })
+  const customer = await store.find('customers', customerId)
+  if (!customer) return res.status(404).json({ code: 404, message: '客户不存在' })
+  const rec = await store.create('followUps', {
+    customerId, customerName: customer.name || '',
+    stage: stage || '初步接触', method: method || '电话',
+    content: content || '', result: result || '',
+    nextDate: nextDate || '', followDate: new Date().toISOString().slice(0, 10),
+  })
+  await store.update('customers', customerId, {
+    stage: stage || '初步接触',
+    lastFollowUp: rec.followDate,
+    nextFollowUp: nextDate || '',
+  })
+  res.json({ code: 200, message: '跟进已记录', data: rec })
+})
+
+// ---------- 拣货单 ----------
+// 从销售订单生成：按 SKU 汇总拣货数量
+app.post('/api/wms/pick-from-order/:id', authRequired, adminRequired, async (req, res) => {
+  const order = await store.find('salesOrders', req.params.id)
+  if (!order) return res.status(404).json({ code: 404, message: '订单不存在' })
+  const products = await store.all('products')
+  const productMap = Object.fromEntries(products.map((p) => [p.id, p]))
+  const merged = {}
+  ;(order.items || []).forEach((it) => {
+    const sku = it.sku || productMap[it.productId]?.sku || 'NO-SKU'
+    const name = it.name || productMap[it.productId]?.name || ''
+    if (!merged[sku]) merged[sku] = { productId: it.productId || '', sku, name, qty: 0, location: productMap[it.productId]?.location || '' }
+    merged[sku].qty += Number(it.qty || 0)
+  })
+  const rec = await store.create('pickLists', {
+    pickNo: 'PK-' + String(order.orderNo || Date.now()).replace(/\W/g, ''),
+    orderNo: order.orderNo || '', orderId: order.id,
+    customerName: order.customerName || '',
+    items: Object.values(merged),
+    status: '待拣货', pickedAt: '',
+  })
+  res.json({ code: 200, message: '拣货单已生成', data: rec })
+})
+
+// 确认拣货
+app.post('/api/wms/pick-confirm/:id', authRequired, adminRequired, async (req, res) => {
+  const rec = await store.find('pickLists', req.params.id)
+  if (!rec) return res.status(404).json({ code: 404, message: '拣货单不存在' })
+  if (rec.status === '已拣货') return res.status(400).json({ code: 400, message: '该拣货单已确认过' })
+  await store.update('pickLists', rec.id, { status: '已拣货', pickedAt: new Date().toISOString().slice(0, 10) })
+  res.json({ code: 200, message: '拣货确认成功' })
+})
+
+// ---------- 汇率 ----------
+// 换算：金额 * 汇率 = 人民币
+app.post('/api/fx/convert', authRequired, adminRequired, async (req, res) => {
+  const { currency, amount } = req.body || {}
+  const rates = await store.all('exchangeRates')
+  const rate = rates.find((r) => r.currency === currency)
+  if (!rate) return res.status(404).json({ code: 404, message: '未找到该币种汇率，请先在汇率管理中添加' })
+  const cny = Math.round(Number(amount || 0) * Number(rate.rate || 0) * 100) / 100
+  res.json({ code: 200, data: { currency, amount: Number(amount || 0), rate: Number(rate.rate), cny } })
 })
 
 // ---------- 库存联动：调整库存并写流水 ----------

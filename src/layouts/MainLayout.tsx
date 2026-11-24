@@ -26,6 +26,7 @@ const adminMenu = [
       { key: '/stock-flow', label: '入库盘点退货' },
       { key: '/warehouses', label: '仓库管理' },
       { key: '/stock-transfers', label: '库存调拨' },
+      { key: '/warehouse-fx', label: '拣货单 · 汇率' },
     ],
   },
   {
@@ -51,12 +52,14 @@ const adminMenu = [
     key: 'grp-finance', icon: <BarChartOutlined />, label: '财务与定价',
     children: [
       { key: '/finance', label: '财务报表' },
+      { key: '/payments', label: '收付款管理' },
       { key: '/profit', label: '利润核算' },
       { key: '/pricing', label: '定价计算器' },
     ],
   },
   { type: 'divider' as const },
   { key: '/customers', icon: <TeamOutlined />, label: '客户管理' },
+  { key: '/crm', icon: <TeamOutlined />, label: '客户跟进 CRM' },
   { key: '/suppliers', icon: <TruckOutlined />, label: '供应商管理' },
   { type: 'divider' as const },
   {
@@ -89,14 +92,15 @@ const titleMap: Record<string, string> = {
   '/order-sync': '多平台订单同步', '/messages': '客户消息聚合',
   '/api-integration': 'API 对接 · 订单推送',
   '/stock-flow': '入库盘点退货', '/data-io': '数据导入导出',
+  '/payments': '收付款管理', '/crm': '客户跟进 CRM', '/warehouse-fx': '拣货单 · 汇率管理',
 }
 
 const groupKeys: Record<string, string> = {
   '/products': 'grp-product', '/sourcing': 'grp-product', '/listings': 'grp-product',
-  '/inventory': 'grp-product', '/stock-flow': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product',
+  '/inventory': 'grp-product', '/stock-flow': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product', '/warehouse-fx': 'grp-product',
   '/sales': 'grp-order', '/purchase': 'grp-order', '/shipments': 'grp-order', '/labels': 'grp-order', '/order-sync': 'grp-order',
   '/shops': 'grp-cross', '/shipping-methods': 'grp-cross', '/shipping-templates': 'grp-cross', '/messages': 'grp-cross',
-  '/finance': 'grp-finance', '/profit': 'grp-finance', '/pricing': 'grp-finance',
+  '/finance': 'grp-finance', '/payments': 'grp-finance', '/profit': 'grp-finance', '/pricing': 'grp-finance',
   '/accounts': 'grp-account', '/customer-accounts': 'grp-account', '/profile': 'grp-account',
   '/api-integration': 'grp-account', '/data-io': 'grp-account',
 }

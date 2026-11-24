@@ -32,6 +32,9 @@ const ApiIntegration = lazy(() => import('./pages/ApiIntegration'))
 const Labels = lazy(() => import('./pages/Labels'))
 const StockFlow = lazy(() => import('./pages/StockFlow'))
 const DataIO = lazy(() => import('./pages/DataIO'))
+const Payments = lazy(() => import('./pages/Payments'))
+const Crm = lazy(() => import('./pages/Crm'))
+const WarehouseFx = lazy(() => import('./pages/WarehouseFx'))
 
 const Loading = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>
@@ -84,6 +87,9 @@ export default function App() {
           <Route path="/labels" element={<AdminOnly><Labels /></AdminOnly>} />
           <Route path="/stock-flow" element={<AdminOnly><StockFlow /></AdminOnly>} />
           <Route path="/data-io" element={<AdminOnly><DataIO /></AdminOnly>} />
+          <Route path="/payments" element={<AdminOnly><Payments /></AdminOnly>} />
+          <Route path="/crm" element={<AdminOnly><Crm /></AdminOnly>} />
+          <Route path="/warehouse-fx" element={<AdminOnly><WarehouseFx /></AdminOnly>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
