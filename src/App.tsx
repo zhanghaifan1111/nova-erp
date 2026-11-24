@@ -43,6 +43,10 @@ const Gl = lazy(() => import('./pages/Gl'))
 const Reconciliation = lazy(() => import('./pages/Reconciliation'))
 const Performance = lazy(() => import('./pages/Performance'))
 const CommandCenter = lazy(() => import('./pages/CommandCenter'))
+const Automation = lazy(() => import('./pages/Automation'))
+const NotificationsPage = lazy(() => import('./pages/NotificationsPage'))
+const Rbac = lazy(() => import('./pages/Rbac'))
+const ServiceBom = lazy(() => import('./pages/ServiceBom'))
 
 const Loading = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>
@@ -106,6 +110,10 @@ export default function App() {
           <Route path="/reconciliation" element={<AdminOnly><Reconciliation /></AdminOnly>} />
           <Route path="/performance" element={<AdminOnly><Performance /></AdminOnly>} />
           <Route path="/command-center" element={<AdminOnly><CommandCenter /></AdminOnly>} />
+          <Route path="/automation" element={<AdminOnly><Automation /></AdminOnly>} />
+          <Route path="/notifications" element={<AdminOnly><NotificationsPage /></AdminOnly>} />
+          <Route path="/rbac" element={<AdminOnly><Rbac /></AdminOnly>} />
+          <Route path="/after-sales" element={<AdminOnly><ServiceBom /></AdminOnly>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

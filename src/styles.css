@@ -186,3 +186,6 @@ body {
 
 /* 高优先级预警行 */
 .row-alert-high td { background: rgba(240,68,56,.06); }
+
+/* 未读通知行 */
+.row-unread td { font-weight: 500; }

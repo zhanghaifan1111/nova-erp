@@ -8,6 +8,7 @@ import {
   BellOutlined, SettingOutlined, SafetyCertificateOutlined, UserOutlined,
   LogoutOutlined, KeyOutlined, DownOutlined, GlobalOutlined,
   FundProjectionScreenOutlined, AuditOutlined, CheckSquareOutlined,
+  RobotOutlined, CustomerServiceOutlined,
 } from '@ant-design/icons'
 import { useAppTheme } from '../theme'
 import { useAuth } from '../auth'
@@ -39,6 +40,7 @@ const adminMenu = [
       { key: '/purchase', label: '采购订单' },
       { key: '/shipments', label: '打单发货' },
       { key: '/labels', label: '箱唛 · 面单打印' },
+      { key: '/after-sales', label: '售后服务 · BOM' },
       { key: '/order-sync', label: '多平台订单同步' },
     ],
   },
@@ -69,9 +71,11 @@ const adminMenu = [
       { key: '/intelligence', label: '智能决策中心' },
       { key: '/workflow', label: '审批中心 · 报销' },
       { key: '/performance', label: 'KPI · 预警中心' },
+      { key: '/automation', label: '自动化规则引擎' },
     ],
   },
   { type: 'divider' as const },
+  { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
   { key: '/customers', icon: <TeamOutlined />, label: '客户管理' },
   { key: '/crm', icon: <TeamOutlined />, label: '客户跟进 CRM' },
   { key: '/suppliers', icon: <TruckOutlined />, label: '供应商管理' },
@@ -80,6 +84,7 @@ const adminMenu = [
     key: 'grp-account', icon: <SafetyCertificateOutlined />, label: '系统设置',
     children: [
       { key: '/accounts', label: '账号管理' },
+      { key: '/rbac', label: 'RBAC 角色权限' },
       { key: '/customer-accounts', label: '客户账号管理' },
       { key: '/api-integration', label: 'API 对接 · 订单推送' },
       { key: '/data-io', label: '数据导入导出' },
@@ -111,17 +116,19 @@ const titleMap: Record<string, string> = {
   '/compliance': '发票 · 操作审计', '/warehouse-intel': '库位 · 销售预测',
   '/command-center': '经营驾驶舱', '/gl': '会计总账', '/reconciliation': '平台结算对账',
   '/performance': 'KPI 目标 · 预警中心',
+  '/automation': '自动化规则引擎', '/notifications': '通知中心', '/rbac': 'RBAC 角色权限',
+  '/after-sales': '售后服务 · 组合商品 BOM',
 }
 
 const groupKeys: Record<string, string> = {
   '/products': 'grp-product', '/sourcing': 'grp-product', '/listings': 'grp-product',
   '/inventory': 'grp-product', '/stock-flow': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product', '/warehouse-fx': 'grp-product', '/warehouse-intel': 'grp-product',
-  '/sales': 'grp-order', '/purchase': 'grp-order', '/shipments': 'grp-order', '/labels': 'grp-order', '/order-sync': 'grp-order',
+  '/sales': 'grp-order', '/purchase': 'grp-order', '/shipments': 'grp-order', '/labels': 'grp-order', '/order-sync': 'grp-order', '/after-sales': 'grp-order',
   '/shops': 'grp-cross', '/shipping-methods': 'grp-cross', '/shipping-templates': 'grp-cross', '/messages': 'grp-cross',
   '/finance': 'grp-finance', '/payments': 'grp-finance', '/profit': 'grp-finance', '/pricing': 'grp-finance', '/compliance': 'grp-finance',
   '/gl': 'grp-finance', '/reconciliation': 'grp-finance',
-  '/intelligence': 'grp-workflow', '/workflow': 'grp-workflow', '/performance': 'grp-workflow',
-  '/accounts': 'grp-account', '/customer-accounts': 'grp-account', '/profile': 'grp-account',
+  '/intelligence': 'grp-workflow', '/workflow': 'grp-workflow', '/performance': 'grp-workflow', '/automation': 'grp-workflow',
+  '/accounts': 'grp-account', '/customer-accounts': 'grp-account', '/profile': 'grp-account', '/rbac': 'grp-account',
   '/api-integration': 'grp-account', '/data-io': 'grp-account',
 }
 

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import { api, setToken } from './api'
 
-type User = { id: string; username: string; name: string; role: 'admin' | 'customer'; customerId?: string }
+type User = { id: string; username: string; name: string; role: 'admin' | 'customer'; roleKey?: string; customerId?: string }
 type AuthCtx = {
   user: User | null
   loading: boolean

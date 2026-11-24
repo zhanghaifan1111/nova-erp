@@ -94,6 +94,14 @@ export const api = {
   kpiAttainment: (month?: string) => request('/kpi/attainment?month=' + (month || new Date().toISOString().slice(0, 7))),
   alertsAll: () => request('/alerts/all'),
   inventoryAging: () => request('/inventory/aging'),
+  ruleRun: (id: string) => request('/rule/run/' + id, { method: 'POST' }),
+  ruleRunAll: () => request('/rule/run-all', { method: 'POST' }),
+  notificationRead: (id: string) => request('/notification/read/' + id, { method: 'POST' }),
+  notificationReadAll: () => request('/notification/read-all', { method: 'POST' }),
+  rbacInitRoles: () => request('/rbac/init-roles', { method: 'POST' }),
+  portalSummary: () => request('/portal/summary'),
+  bomCalc: (bundleId: string, qty: number) => request('/bom/calc', { method: 'POST', body: JSON.stringify({ bundleId, qty }) }),
+  afterSalesProcess: (id: string, status: string, solution?: string) => request('/after-sales/process/' + id, { method: 'POST', body: JSON.stringify({ status, solution }) }),
   health: () => request('/health'),
 }
 

@@ -27,6 +27,7 @@ async function seedUsers() {
     passwordHash: bcrypt.hashSync('admin123', 10),
     name: '系统管理员',
     role: 'admin',
+    roleKey: 'admin',
     customerId: null,
     status: '启用',
   })
@@ -43,7 +44,7 @@ app.post('/api/admin/clear-business-data', authRequired, adminRequired, async (r
 
 // ---------- 鉴权中间件 ----------
 function signToken(user) {
-  return jwt.sign({ id: user.id, username: user.username, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: '7d' })
+  return jwt.sign({ id: user.id, username: user.username, role: user.role, roleKey: user.roleKey, customerId: user.customerId || null, name: user.name }, JWT_SECRET, { expiresIn: '7d' })
 }
 
 function authRequired(req, res, next) {
@@ -105,7 +106,7 @@ app.get('/api/users', authRequired, adminRequired, async (req, res) => {
 })
 
 app.post('/api/users', authRequired, adminRequired, async (req, res) => {
-  const { username, password, name, role, customerId, status } = req.body || {}
+  const { username, password, name, role, customerId, status, roleKey } = req.body || {}
   if (!username || !password) return res.status(400).json({ code: 400, message: '账号和密码必填' })
   if (await store.findBy('users', 'username', String(username).trim())) {
     return res.status(400).json({ code: 400, message: '账号已存在' })
@@ -115,6 +116,7 @@ app.post('/api/users', authRequired, adminRequired, async (req, res) => {
     passwordHash: bcrypt.hashSync(String(password), 10),
     name: name || username,
     role: role === 'customer' ? 'customer' : 'admin',
+    roleKey: roleKey || (role === 'customer' ? 'customer' : 'admin'),
     customerId: role === 'customer' ? (customerId || null) : null,
     status: status || '启用',
   })
@@ -122,10 +124,11 @@ app.post('/api/users', authRequired, adminRequired, async (req, res) => {
 })
 
 app.put('/api/users/:id', authRequired, adminRequired, async (req, res) => {
-  const { name, role, customerId, status, password } = req.body || {}
+  const { name, role, customerId, status, password, roleKey } = req.body || {}
   const patch = {}
   if (name !== undefined) patch.name = name
   if (role !== undefined) patch.role = role === 'customer' ? 'customer' : 'admin'
+  if (roleKey !== undefined) patch.roleKey = roleKey
   if (customerId !== undefined) patch.customerId = patch.role === 'customer' ? customerId : null
   if (status !== undefined) patch.status = status
   if (password) patch.passwordHash = bcrypt.hashSync(String(password), 10)
@@ -185,6 +188,7 @@ const COLLECTIONS = [
   'payments', 'followUps', 'pickLists', 'exchangeRates',
   'approvals', 'expenses', 'invoices', 'auditLogs', 'locations',
   'glAccounts', 'vouchers', 'settlements', 'kpiTargets',
+  'automationRules', 'ruleLogs', 'roles', 'notifications', 'afterSales', 'bundles',
 ]
 
 function scopeRows(req, key, rows) {
@@ -429,6 +433,181 @@ app.post('/api/messages/:id/reply', authRequired, async (req, res) => {
   replies.push({ content: String(content).trim(), at: new Date().toISOString(), by: req.user?.name || req.user?.username || '系统' })
   const rec = await store.update('messages', msg.id, { status: '已回复', replies, repliedAt: new Date().toISOString().slice(0, 10) })
   res.json({ code: 200, message: '回复成功', data: rec })
+})
+
+// ---------- 自动化规则引擎 ----------
+const notify = async (title, content, category, link) => {
+  await store.create('notifications', { title, content, category: category || '系统', link: link || '', read: false })
+}
+
+// 运行单条规则（供手动触发与批量共用）
+async function runRule(rule) {
+  let matched = 0, actions = []
+  const products = await store.all('products')
+  const sales = await store.all('salesOrders')
+  const payments = await store.all('payments')
+  const cond = rule.condition || {}
+  let targets = []
+
+  if (cond.type === 'lowStock') {
+    targets = products.filter((p) => Number(p.stock || 0) <= Number(p.safeStock || 0))
+  } else if (cond.type === 'overdueOrder') {
+    const days = Number(cond.days || 3)
+    targets = sales.filter((o) => {
+      if (['已完成', '已取消', '已发货'].includes(o.status)) return false
+      if (!o.orderDate) return false
+      return Math.floor((Date.now() - new Date(o.orderDate)) / 86400000) > days
+    })
+  } else if (cond.type === 'overdueReceivable') {
+    const days = Number(cond.days || 30)
+    targets = sales.filter((o) => {
+      if (o.status === '已取消') return false
+      const received = payments.filter((p) => p.direction === '收款' && p.relatedNo === o.orderNo).reduce((s, p) => s + Number(p.amount || 0), 0)
+      const balance = Number(o.total || 0) - received
+      const age = o.orderDate ? Math.floor((Date.now() - new Date(o.orderDate)) / 86400000) : 0
+      return balance > 0 && age > days
+    })
+  }
+  matched = targets.length
+
+  for (const t of targets) {
+    for (const action of (rule.actions || [])) {
+      if (action === 'createPurchase') {
+        if (cond.type === 'lowStock' && t.id) {
+          const qty = Math.max(Number(t.safeStock || 10) * 2 - Number(t.stock || 0), 1)
+          await store.create('purchaseOrders', {
+            orderNo: 'PO-AUTO-' + Date.now().toString().slice(-6),
+            supplierName: '', items: [{ productId: t.id, sku: t.sku, name: t.name, qty, price: Number(t.costPrice || 0) }],
+            total: Math.round(qty * Number(t.costPrice || 0) * 100) / 100,
+            status: '待审批', source: `自动化规则:${rule.name}`,
+          })
+          actions.push(`为 ${t.sku} 生成采购单`)
+        }
+      } else if (action === 'notify') {
+        await notify(`[自动提醒] ${rule.name}`, `${t.sku || t.orderNo || ''} 触发条件`, '自动化', rule.link || '')
+        actions.push(`通知: ${t.sku || t.orderNo || ''}`)
+      } else if (action === 'createAlert') {
+        await notify(`[预警] ${rule.name}`, `${t.sku || t.orderNo || ''} 需要处理`, '预警', rule.link || '')
+        actions.push(`预警: ${t.sku || t.orderNo || ''}`)
+      }
+    }
+  }
+  return { matched, actions: actions.slice(0, 20) }
+}
+
+app.post('/api/rule/run/:id', authRequired, adminRequired, async (req, res) => {
+  const rule = await store.find('automationRules', req.params.id)
+  if (!rule) return res.status(404).json({ code: 404, message: '规则不存在' })
+  const result = await runRule(rule)
+  await store.create('ruleLogs', {
+    ruleId: rule.id, ruleName: rule.name,
+    matched: result.matched, actions: result.actions.join('；'),
+    at: new Date().toISOString(), triggeredBy: req.user?.name || '系统',
+  })
+  await store.update('automationRules', rule.id, { lastRun: new Date().toISOString(), lastMatched: result.matched })
+  res.json({ code: 200, message: `规则执行完成，命中 ${result.matched} 条`, data: result })
+})
+
+app.post('/api/rule/run-all', authRequired, adminRequired, async (req, res) => {
+  const rules = (await store.all('automationRules')).filter((r) => r.enabled === '启用')
+  let total = 0
+  for (const rule of rules) {
+    const result = await runRule(rule)
+    total += result.matched
+    await store.create('ruleLogs', {
+      ruleId: rule.id, ruleName: rule.name, matched: result.matched,
+      actions: result.actions.join('；'), at: new Date().toISOString(), triggeredBy: '批量运行',
+    })
+    await store.update('automationRules', rule.id, { lastRun: new Date().toISOString(), lastMatched: result.matched })
+  }
+  res.json({ code: 200, message: `${rules.length} 条规则执行完成，共命中 ${total} 条`, data: { rules: rules.length, total } })
+})
+
+// ---------- 通知中心 ----------
+app.post('/api/notification/read/:id', authRequired, async (req, res) => {
+  const rec = await store.find('notifications', req.params.id)
+  if (!rec) return res.status(404).json({ code: 404, message: '通知不存在' })
+  await store.update('notifications', rec.id, { read: true, readAt: new Date().toISOString() })
+  res.json({ code: 200, message: '已标记为已读' })
+})
+app.post('/api/notification/read-all', authRequired, async (req, res) => {
+  const rows = await store.all('notifications')
+  for (const n of rows.filter((n) => !n.read)) await store.update('notifications', n.id, { read: true, readAt: new Date().toISOString() })
+  res.json({ code: 200, message: '全部已读' })
+})
+
+// ---------- 初始化默认角色 ----------
+app.post('/api/rbac/init-roles', authRequired, adminRequired, async (req, res) => {
+  const existing = await store.all('roles')
+  const defaults = [
+    { key: 'operator', name: '操作员', menus: ['/', '/products', '/inventory', '/sales', '/purchase', '/shipments', '/labels'], desc: '日常订单与商品操作' },
+    { key: 'warehouse', name: '仓库管理员', menus: ['/', '/products', '/inventory', '/stock-flow', '/warehouses', '/stock-transfers', '/warehouse-fx', '/warehouse-intel', '/labels'], desc: '库存与仓库作业' },
+    { key: 'finance', name: '财务人员', menus: ['/', '/finance', '/payments', '/profit', '/pricing', '/compliance', '/gl', '/reconciliation', '/performance'], desc: '财务与结算' },
+    { key: 'service', name: '客服人员', menus: ['/', '/sales', '/customers', '/crm', '/messages', '/after-sales'], desc: '客户与售后' },
+  ]
+  let added = 0
+  for (const r of defaults) {
+    if (existing.some((x) => x.key === r.key)) continue
+    await store.create('roles', { ...r, status: '启用' })
+    added++
+  }
+  res.json({ code: 200, message: `已初始化 ${added} 个角色`, data: { added } })
+})
+
+// ---------- 客户门户数据（客户账号仅看自己） ----------
+app.get('/api/portal/summary', authRequired, async (req, res) => {
+  const cid = req.user?.customerId
+  if (!cid) return res.status(403).json({ code: 403, message: '仅客户账号可访问' })
+  const [sales, customer, payments] = await Promise.all([store.all('salesOrders'), store.all('customers'), store.all('payments')])
+  const mine = sales.filter((o) => o.customerId === cid)
+  const valid = mine.filter((o) => o.status !== '已取消')
+  const received = payments.filter((p) => p.direction === '收款' && mine.some((o) => o.orderNo === p.relatedNo)).reduce((s, p) => s + Number(p.amount || 0), 0)
+  const me = customer.find((c) => c.id === cid)
+  res.json({
+    code: 200,
+    data: {
+      customer: me || {},
+      orders: mine.slice(0, 20),
+      stats: {
+        orderCount: mine.length,
+        totalAmount: Math.round(valid.reduce((s, o) => s + Number(o.total || 0), 0) * 100) / 100,
+        received: Math.round(received * 100) / 100,
+        unpaid: Math.round((valid.reduce((s, o) => s + Number(o.total || 0), 0) - received) * 100) / 100,
+      },
+    },
+  })
+})
+
+// ---------- 组合商品 BOM：价格与库存换算 ----------
+app.post('/api/bom/calc', authRequired, adminRequired, async (req, res) => {
+  const { bundleId, qty } = req.body || {}
+  const bundle = await store.find('bundles', bundleId)
+  if (!bundle) return res.status(404).json({ code: 404, message: '组合商品不存在' })
+  const products = await store.all('products')
+  const rows = (bundle.items || []).map((it) => {
+    const p = products.find((x) => x.id === it.productId)
+    return {
+      productId: it.productId, sku: it.sku || p?.sku || '', name: it.name || p?.name || '',
+      perSet: Number(it.qty || 1), needed: Number(it.qty || 1) * Number(qty || 1),
+      stock: p ? Number(p.stock || 0) : 0,
+      cost: Math.round(Number(it.qty || 1) * Number(p?.costPrice || 0) * 100) / 100,
+      enough: p ? Number(p.stock || 0) >= Number(it.qty || 1) * Number(qty || 1) : false,
+    }
+  })
+  const costTotal = Math.round(rows.reduce((s, r) => s + r.cost, 0) * 100) / 100
+  const canAssemble = rows.every((r) => r.enough)
+  res.json({ code: 200, data: { rows, costTotal, canAssemble, maxSets: canAssemble ? Math.min(...rows.map((r) => Math.floor(r.stock / r.perSet))) : 0 } })
+})
+
+// ---------- 售后工单流转 ----------
+app.post('/api/after-sales/process/:id', authRequired, adminRequired, async (req, res) => {
+  const rec = await store.find('afterSales', req.params.id)
+  if (!rec) return res.status(404).json({ code: 404, message: '售后单不存在' })
+  if (['已完成', '已取消'].includes(rec.status)) return res.status(400).json({ code: 400, message: '该售后单已结束' })
+  const { status, solution } = req.body || {}
+  if (!['处理中', '已完成', '已取消'].includes(status)) return res.status(400).json({ code: 400, message: '状态无效' })
+  await store.update('afterSales', rec.id, { status, solution: solution || rec.solution || '', processedAt: new Date().toISOString().slice(0, 10) })
+  res.json({ code: 200, message: `售后单已更新为「${status}」` })
 })
 
 // ---------- 会计总账 ----------
