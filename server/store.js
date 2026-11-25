@@ -32,6 +32,7 @@ export const COLLECTIONS = [
   'adCampaigns', 'deals',
   'shipments_tracking', 'stockLocks', 'coupons',
   'csRules', 'blacklist', 'products_research', 'competitors',
+  'waves', 'orderRules', 'inventorySyncRules', 'scheduledListings',
   'users',
 ]
 const BUSINESS_COLLECTIONS = [
@@ -49,6 +50,7 @@ const BUSINESS_COLLECTIONS = [
   'adCampaigns', 'deals',
   'shipments_tracking', 'stockLocks', 'coupons',
   'csRules', 'blacklist', 'products_research', 'competitors',
+  'waves', 'orderRules', 'inventorySyncRules', 'scheduledListings',
 ]
 
 function emptyDb() {

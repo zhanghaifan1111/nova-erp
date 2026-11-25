@@ -193,6 +193,7 @@ const COLLECTIONS = [
   'adCampaigns', 'deals',
   'shipments_tracking', 'stockLocks', 'coupons',
   'csRules', 'blacklist', 'products_research', 'competitors',
+  'waves', 'orderRules', 'inventorySyncRules', 'scheduledListings',
 ]
 
 function scopeRows(req, key, rows) {
@@ -437,6 +438,190 @@ app.post('/api/messages/:id/reply', authRequired, async (req, res) => {
   replies.push({ content: String(content).trim(), at: new Date().toISOString(), by: req.user?.name || req.user?.username || '系统' })
   const rec = await store.update('messages', msg.id, { status: '已回复', replies, repliedAt: new Date().toISOString().slice(0, 10) })
   res.json({ code: 200, message: '回复成功', data: rec })
+})
+
+// ---------- 产品搬家（跨平台批量复制） ----------
+// 把源店铺商品批量复制到目标店铺，支持加价系数与字段覆盖
+app.post('/api/migrate/products', authRequired, adminRequired, async (req, res) => {
+  const { sourceShop, targetShop, productIds, priceFactor, status } = req.body || {}
+  if (!sourceShop || !targetShop) return res.status(400).json({ code: 400, message: '请选择源店铺和目标店铺' })
+  const products = await store.all('products')
+  const factor = Number(priceFactor || 1)
+  const ids = Array.isArray(productIds) && productIds.length ? productIds : products.filter((p) => p.shopName === sourceShop).map((p) => p.id)
+  let copied = 0
+  for (const pid of ids) {
+    const p = products.find((x) => x.id === pid)
+    if (!p) continue
+    await store.create('listings', {
+      title: p.name || '', sku: p.sku,
+      shopName: targetShop,
+      sourceShop,
+      price: Math.round(Number(p.price || 0) * factor * 100) / 100,
+      costPrice: Number(p.costPrice || 0),
+      images: p.images || [],
+      category: p.category || '',
+      status: status || '草稿',
+      source: '产品搬家',
+      migratedAt: new Date().toISOString().slice(0, 10),
+    })
+    copied++
+  }
+  res.json({ code: 200, message: `已从「${sourceShop}」搬家 ${copied} 个商品到「${targetShop}」`, data: { copied } })
+})
+
+// ---------- 波次发货（多订单合并拣货） ----------
+// 创建波次：选多个订单，按SKU汇总拣货清单
+app.post('/api/wave/create', authRequired, adminRequired, async (req, res) => {
+  const { waveNo, orderNos } = req.body || {}
+  if (!Array.isArray(orderNos) || !orderNos.length) return res.status(400).json({ code: 400, message: '请选择至少一个订单' })
+  const sales = await store.all('salesOrders')
+  const chosen = sales.filter((o) => orderNos.includes(o.orderNo))
+  if (!chosen.length) return res.status(404).json({ code: 404, message: '订单不存在' })
+  // 按SKU汇总
+  const pickMap = {}
+  chosen.forEach((o) => (o.items || []).forEach((it) => {
+    const key = it.sku || it.name || '未知'
+    if (!pickMap[key]) pickMap[key] = { sku: key, name: it.name || '', qty: 0, orders: [] }
+    pickMap[key].qty += Number(it.qty || 0)
+    pickMap[key].orders.push(o.orderNo)
+  }))
+  const wave = await store.create('waves', {
+    waveNo: waveNo || 'WAVE-' + Date.now().toString().slice(-6),
+    orderNos: chosen.map((o) => o.orderNo),
+    orderCount: chosen.length,
+    pickList: Object.values(pickMap),
+    status: '待拣货',
+    createdAt: new Date().toISOString().slice(0, 10),
+  })
+  res.json({ code: 200, message: `波次已创建，${chosen.length} 单，${Object.keys(pickMap).length} 个SKU待拣`, data: wave })
+})
+
+// 波次发货完成
+app.post('/api/wave/ship/:id', authRequired, adminRequired, async (req, res) => {
+  const wave = await store.find('waves', req.params.id)
+  if (!wave) return res.status(404).json({ code: 404, message: '波次不存在' })
+  if (wave.status === '已发货') return res.status(400).json({ code: 400, message: '该波次已发货' })
+  const sales = await store.all('salesOrders')
+  let shipped = 0
+  for (const no of wave.orderNos || []) {
+    const order = sales.find((o) => o.orderNo === no)
+    if (order) { await store.update('salesOrders', order.id, { status: '已发货', shippedAt: new Date().toISOString().slice(0, 10) }); shipped++ }
+  }
+  await store.update('waves', wave.id, { status: '已发货', shippedAt: new Date().toISOString().slice(0, 10), shippedCount: shipped })
+  res.json({ code: 200, message: `波次已发货，${shipped} 个订单状态更新为已发货` })
+})
+
+// ---------- 自动审单规则 ----------
+// 规则条件：金额区间/地区/关键词 → 动作：自动审核/拦截/分配物流
+app.post('/api/order-rule/evaluate', authRequired, adminRequired, async (req, res) => {
+  const { orderNo } = req.body || {}
+  const order = (await store.all('salesOrders')).find((o) => o.orderNo === orderNo)
+  if (!order) return res.status(404).json({ code: 404, message: '订单不存在' })
+  const rules = (await store.all('orderRules')).filter((r) => r.enabled !== '停用')
+    .sort((a, b) => Number(b.priority || 0) - Number(a.priority || 0))
+  const sales = await store.all('salesOrders')
+  const methods = await store.all('shippingMethods')
+  const total = Number(order.total || 0)
+  let action = '手动处理', reason = '未命中任何规则', matched = null, shippingMethod = ''
+  for (const r of rules) {
+    const c = r.condition || {}
+    let hit = false
+    if (c.type === 'amount') {
+      hit = total >= Number(c.min || 0) && (c.max === undefined || c.max === '' || total <= Number(c.max))
+    } else if (c.type === 'keyword') {
+      hit = String(order.customerName || '').includes(c.value || '') || (order.items || []).some((it) => String(it.name || '').includes(c.value || ''))
+    } else if (c.type === 'region') {
+      hit = String(order.region || order.customerName || '').includes(c.value || '')
+    }
+    if (hit) {
+      matched = r
+      action = r.action || '手动处理'
+      reason = `命中规则「${r.name}」`
+      shippingMethod = r.shippingMethod || ''
+      break
+    }
+  }
+  // 自动分配物流渠道（未指定则从物流商列表取最便宜的）
+  if (!shippingMethod && action === '自动审核') {
+    const cheapest = [...methods].sort((a, b) => Number(a.cost || 0) - Number(b.cost || 0))[0]
+    shippingMethod = cheapest?.name || ''
+  }
+  if (action === '自动审核') {
+    await store.update('salesOrders', order.id, { status: '待发货', autoReviewed: true, reviewNote: reason })
+  } else if (action === '拦截') {
+    await store.update('salesOrders', order.id, { status: '已拦截', reviewNote: reason })
+  }
+  res.json({ code: 200, data: { orderNo, total, action, reason, rule: matched?.name || '', shippingMethod, newStatus: action === '自动审核' ? '待发货' : action === '拦截' ? '已拦截' : order.status } })
+})
+
+// 批量审单
+app.post('/api/order-rule/batch', authRequired, adminRequired, async (req, res) => {
+  const orders = (await store.all('salesOrders')).filter((o) => ['待审核', '新建'].includes(o.status))
+  const methods = await store.all('shippingMethods')
+  const rules = (await store.all('orderRules')).filter((r) => r.enabled !== '停用')
+    .sort((a, b) => Number(b.priority || 0) - Number(a.priority || 0))
+  let autoPassed = 0, blocked = 0
+  for (const o of orders) {
+    const total = Number(o.total || 0)
+    const hit = rules.find((r) => {
+      const c = r.condition || {}
+      if (c.type === 'amount') return total >= Number(c.min || 0) && (c.max === '' || c.max === undefined || total <= Number(c.max))
+      if (c.type === 'keyword') return String(o.customerName || '').includes(c.value || '')
+      return false
+    })
+    if (hit?.action === '自动审核') { await store.update('salesOrders', o.id, { status: '待发货', autoReviewed: true, reviewNote: `自动审核:${hit.name}` }); autoPassed++ }
+    else if (hit?.action === '拦截') { await store.update('salesOrders', o.id, { status: '已拦截', reviewNote: `拦截:${hit.name}` }); blocked++ }
+  }
+  res.json({ code: 200, message: `批量审单完成：自动通过 ${autoPassed}，拦截 ${blocked}`, data: { autoPassed, blocked } })
+})
+
+// ---------- 多店铺库存同步规则 ----------
+// 按规则把总库存分配到各店铺，防超卖
+app.post('/api/inventory-sync/apply', authRequired, adminRequired, async (req, res) => {
+  const { ruleId } = req.body || {}
+  const rule = await store.find('inventorySyncRules', ruleId)
+  if (!rule) return res.status(404).json({ code: 404, message: '同步规则不存在' })
+  const products = await store.all('products')
+  const product = products.find((p) => p.sku === rule.sku)
+  if (!product) return res.status(404).json({ code: 404, message: `商品 ${rule.sku} 不存在` })
+  const totalStock = Number(product.stock || 0)
+  const allocations = []
+  const shops = Array.isArray(rule.shops) && rule.shops.length ? rule.shops : []
+  for (const shop of shops) {
+    let qty = 0
+    if (rule.mode === '按比例') {
+      qty = Math.floor(totalStock * Number(shop.ratio || 0) / 100)
+    } else {
+      qty = Math.min(Number(shop.fixed || 0), totalStock)
+    }
+    allocations.push({ shop: shop.name, qty, ratio: shop.ratio || 0 })
+  }
+  const allocated = allocations.reduce((s, a) => s + a.qty, 0)
+  await store.update('inventorySyncRules', rule.id, { lastSync: new Date().toISOString().slice(0, 10), lastAllocations: allocations })
+  res.json({
+    code: 200,
+    message: `已同步 ${rule.sku} 库存到 ${allocations.length} 个店铺`,
+    data: { sku: rule.sku, totalStock, allocations, allocated, reserved: totalStock - allocated, mode: rule.mode },
+  })
+})
+
+// ---------- 定时上下架任务 ----------
+app.get('/api/schedule/process', authRequired, adminRequired, async (req, res) => {
+  const tasks = await store.all('scheduledListings')
+  const now = new Date().toISOString()
+  let executed = 0
+  for (const t of tasks) {
+    if (t.status !== '待执行' || !t.runAt || t.runAt > now) continue
+    // 更新对应刊登/商品状态
+    if (t.targetId) {
+      const col = t.targetType === 'product' ? 'products' : 'listings'
+      const target = await store.find(col, t.targetId)
+      if (target) await store.update(col, t.targetId, { status: t.action === '上架' ? '在售' : '已下架' })
+    }
+    await store.update('scheduledListings', t.id, { status: '已执行', executedAt: now })
+    executed++
+  }
+  res.json({ code: 200, message: `定时任务处理完成，执行 ${executed} 条`, data: { executed } })
 })
 
 // ---------- AI 工具箱（对标店小秘，本地规则引擎，无外部API依赖） ----------

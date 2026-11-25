@@ -59,6 +59,9 @@ const MonitorPromo = lazy(() => import('./pages/MonitorPromo'))
 const AiToolbox = lazy(() => import('./pages/AiToolbox'))
 const CsResearch = lazy(() => import('./pages/CsResearch'))
 const ListingStudio = lazy(() => import('./pages/ListingStudio'))
+const MigrationWaves = lazy(() => import('./pages/MigrationWaves'))
+const ReviewSync = lazy(() => import('./pages/ReviewSync'))
+const ImageSchedule = lazy(() => import('./pages/ImageSchedule'))
 
 const Loading = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>
@@ -138,6 +141,9 @@ export default function App() {
           <Route path="/ai-toolbox" element={<AdminOnly><AiToolbox /></AdminOnly>} />
           <Route path="/cs-research" element={<AdminOnly><CsResearch /></AdminOnly>} />
           <Route path="/listing-studio" element={<AdminOnly><ListingStudio /></AdminOnly>} />
+          <Route path="/migration-waves" element={<AdminOnly><MigrationWaves /></AdminOnly>} />
+          <Route path="/review-sync" element={<AdminOnly><ReviewSync /></AdminOnly>} />
+          <Route path="/image-schedule" element={<AdminOnly><ImageSchedule /></AdminOnly>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

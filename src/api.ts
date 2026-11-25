@@ -127,6 +127,13 @@ export const api = {
   aiCompliance: (text: string, platform: string) => request('/ai/compliance', { method: 'POST', body: JSON.stringify({ text, platform }) }),
   csAutoReply: (message: string) => request('/cs/auto-reply', { method: 'POST', body: JSON.stringify({ message }) }),
   researchScore: (rows: any[]) => request('/research/score', { method: 'POST', body: JSON.stringify({ rows }) }),
+  migrateProducts: (body: any) => request('/migrate/products', { method: 'POST', body: JSON.stringify(body) }),
+  waveCreate: (body: any) => request('/wave/create', { method: 'POST', body: JSON.stringify(body) }),
+  waveShip: (id: string) => request('/wave/ship/' + id, { method: 'POST' }),
+  orderRuleEvaluate: (orderNo: string) => request('/order-rule/evaluate', { method: 'POST', body: JSON.stringify({ orderNo }) }),
+  orderRuleBatch: () => request('/order-rule/batch', { method: 'POST' }),
+  inventorySyncApply: (ruleId: string) => request('/inventory-sync/apply', { method: 'POST', body: JSON.stringify({ ruleId }) }),
+  scheduleProcess: () => request('/schedule/process'),
   health: () => request('/health'),
 }
 

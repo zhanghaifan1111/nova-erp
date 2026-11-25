@@ -33,6 +33,7 @@ const adminMenu = [
       { key: '/warehouse-fx', label: '拣货单 · 汇率' },
       { key: '/warehouse-intel', label: '库位 · 销售预测' },
       { key: '/quality', label: '质检 · 批次追溯' },
+      { key: '/migration-waves', label: '产品搬家 · 波次发货' },
     ],
   },
   {
@@ -44,6 +45,7 @@ const adminMenu = [
       { key: '/labels', label: '箱唛 · 面单打印' },
       { key: '/rfq', label: '供应商询价比价' },
       { key: '/after-sales', label: '售后服务 · BOM' },
+      { key: '/review-sync', label: '自动审单 · 库存同步' },
       { key: '/order-sync', label: '多平台订单同步' },
     ],
   },
@@ -81,6 +83,7 @@ const adminMenu = [
       { key: '/reports', label: '自定义报表' },
       { key: '/team-funnel', label: '员工绩效 · 销售漏斗' },
       { key: '/ai-toolbox', label: 'AI 工具箱' },
+      { key: '/image-schedule', label: '在线美图 · 定时刊登' },
     ],
   },
   { type: 'divider' as const },
@@ -136,16 +139,17 @@ const titleMap: Record<string, string> = {
   '/tracking-sharing': '物流轨迹 · 库存共享', '/pricing-backup': '智能定价 · 数据备份',
   '/monitor-promo': '系统监控 · 促销优惠券',
   '/ai-toolbox': 'AI 工具箱', '/cs-research': '智能客服 · 选品竞品', '/listing-studio': '一站式 Listing 工作台',
+  '/migration-waves': '产品搬家 · 波次发货', '/review-sync': '自动审单 · 库存同步', '/image-schedule': '在线美图 · 定时刊登',
 }
 
 const groupKeys: Record<string, string> = {
   '/products': 'grp-product', '/sourcing': 'grp-product', '/listings': 'grp-product',
-  '/inventory': 'grp-product', '/stock-flow': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product', '/warehouse-fx': 'grp-product', '/warehouse-intel': 'grp-product', '/quality': 'grp-product',
-  '/sales': 'grp-order', '/purchase': 'grp-order', '/shipments': 'grp-order', '/labels': 'grp-order', '/order-sync': 'grp-order', '/after-sales': 'grp-order', '/rfq': 'grp-order',
+  '/inventory': 'grp-product', '/stock-flow': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product', '/warehouse-fx': 'grp-product', '/warehouse-intel': 'grp-product', '/quality': 'grp-product', '/migration-waves': 'grp-product',
+  '/sales': 'grp-order', '/purchase': 'grp-order', '/shipments': 'grp-order', '/labels': 'grp-order', '/order-sync': 'grp-order', '/after-sales': 'grp-order', '/rfq': 'grp-order', '/review-sync': 'grp-order',
   '/shops': 'grp-cross', '/shipping-methods': 'grp-cross', '/shipping-templates': 'grp-cross', '/messages': 'grp-cross', '/ads-transfer': 'grp-cross', '/tracking-sharing': 'grp-cross', '/cs-research': 'grp-cross',
   '/finance': 'grp-finance', '/payments': 'grp-finance', '/profit': 'grp-finance', '/pricing': 'grp-finance', '/compliance': 'grp-finance',
   '/gl': 'grp-finance', '/reconciliation': 'grp-finance',
-  '/intelligence': 'grp-workflow', '/workflow': 'grp-workflow', '/performance': 'grp-workflow', '/automation': 'grp-workflow', '/reports': 'grp-workflow', '/team-funnel': 'grp-workflow', '/ai-toolbox': 'grp-workflow',
+  '/intelligence': 'grp-workflow', '/workflow': 'grp-workflow', '/performance': 'grp-workflow', '/automation': 'grp-workflow', '/reports': 'grp-workflow', '/team-funnel': 'grp-workflow', '/ai-toolbox': 'grp-workflow', '/image-schedule': 'grp-workflow',
   '/accounts': 'grp-account', '/customer-accounts': 'grp-account', '/profile': 'grp-account', '/rbac': 'grp-account', '/global-settings': 'grp-account', '/pricing-backup': 'grp-account', '/monitor-promo': 'grp-account',
   '/api-integration': 'grp-account', '/data-io': 'grp-account',
 }
