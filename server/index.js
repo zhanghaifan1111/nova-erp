@@ -191,6 +191,7 @@ const COLLECTIONS = [
   'automationRules', 'ruleLogs', 'roles', 'notifications', 'afterSales', 'bundles',
   'rfqs', 'qualityChecks', 'batches', 'reports',
   'adCampaigns', 'deals',
+  'shipments_tracking', 'stockLocks', 'coupons',
 ]
 
 function scopeRows(req, key, rows) {
@@ -435,6 +436,158 @@ app.post('/api/messages/:id/reply', authRequired, async (req, res) => {
   replies.push({ content: String(content).trim(), at: new Date().toISOString(), by: req.user?.name || req.user?.username || '系统' })
   const rec = await store.update('messages', msg.id, { status: '已回复', replies, repliedAt: new Date().toISOString().slice(0, 10) })
   res.json({ code: 200, message: '回复成功', data: rec })
+})
+
+// ---------- 物流轨迹追踪 ----------
+// 添加轨迹节点
+app.post('/api/tracking/add-event/:id', authRequired, adminRequired, async (req, res) => {
+  const rec = await store.find('shipments_tracking', req.params.id)
+  if (!rec) return res.status(404).json({ code: 404, message: '运单不存在' })
+  const { status, location, note, at } = req.body || {}
+  if (!status) return res.status(400).json({ code: 400, message: '请填写轨迹状态' })
+  const events = [...(rec.events || []), { status, location: location || '', note: note || '', at: at || new Date().toISOString() }]
+  const patch = { events, lastStatus: status, lastUpdate: new Date().toISOString() }
+  if (status === '已签收') patch.delivered = true
+  await store.update('shipments_tracking', rec.id, patch)
+  res.json({ code: 200, message: '轨迹已更新' })
+})
+
+// 异常件：超过 N 天未更新且未签收
+app.get('/api/tracking/exceptions', authRequired, adminRequired, async (req, res) => {
+  const days = Number(req.query.days || 7)
+  const rows = (await store.all('shipments_tracking')).filter((t) => {
+    if (t.delivered) return false
+    const last = t.lastUpdate || t.createdAt
+    if (!last) return false
+    return (Date.now() - new Date(last)) / 86400000 > days
+  }).map((t) => ({
+    ...t,
+    stuckDays: Math.floor((Date.now() - new Date(t.lastUpdate || t.createdAt)) / 86400000),
+  }))
+  res.json({ code: 200, data: { rows, total: rows.length } })
+})
+
+// ---------- 多店铺库存共享（防超卖） ----------
+// 锁定库存：创建销售订单时锁库，检查可用库存（共享库存 - 已锁定）
+app.post('/api/stock/lock', authRequired, adminRequired, async (req, res) => {
+  const { sku, qty, orderNo } = req.body || {}
+  const n = Number(qty || 0)
+  if (n <= 0) return res.status(400).json({ code: 400, message: '锁定数量必须大于0' })
+  const products = await store.all('products')
+  const product = products.find((p) => p.sku === sku)
+  if (!product) return res.status(404).json({ code: 404, message: '商品不存在' })
+  const locks = await store.all('stockLocks')
+  const locked = locks.filter((l) => l.sku === sku && !l.released).reduce((s, l) => s + Number(l.qty || 0), 0)
+  const available = Number(product.stock || 0) - locked
+  if (available < n) return res.status(400).json({ code: 400, message: `库存不足：可用 ${available}，需锁定 ${n}` })
+  const rec = await store.create('stockLocks', { sku, productId: product.id, qty: n, orderNo: orderNo || '', released: false })
+  res.json({ code: 200, message: `已锁定 ${n} 件（可用剩余 ${available - n}）`, data: { ...rec, available: available - n } })
+})
+
+// 释放锁定
+app.post('/api/stock/unlock/:id', authRequired, adminRequired, async (req, res) => {
+  const rec = await store.find('stockLocks', req.params.id)
+  if (!rec) return res.status(404).json({ code: 404, message: '锁定记录不存在' })
+  if (rec.released) return res.status(400).json({ code: 400, message: '已释放过' })
+  await store.update('stockLocks', rec.id, { released: true, releasedAt: new Date().toISOString() })
+  res.json({ code: 200, message: '库存已释放' })
+})
+
+// 库存占用概览：每个SKU的真实库存/已锁定/可用
+app.get('/api/stock/availability', authRequired, adminRequired, async (req, res) => {
+  const [products, locks] = await Promise.all([store.all('products'), store.all('stockLocks')])
+  const rows = products.map((p) => {
+    const locked = locks.filter((l) => l.sku === p.sku && !l.released).reduce((s, l) => s + Number(l.qty || 0), 0)
+    const stock = Number(p.stock || 0)
+    return { sku: p.sku, name: p.name, stock, locked, available: stock - locked }
+  }).filter((r) => r.locked > 0)
+  res.json({ code: 200, data: { rows } })
+})
+
+// ---------- 智能定价 ----------
+// 反推售价：目标售价 = (成本 + 平台固定费) / (1 - 佣金率 - 利润率)
+app.post('/api/pricing/suggest', authRequired, adminRequired, async (req, res) => {
+  const { cost, platformFee, commissionRate, profitRate, shipping } = req.body || {}
+  const c = Number(cost || 0), fixed = Number(platformFee || 0) + Number(shipping || 0)
+  const cr = Number(commissionRate || 0) / 100, pr = Number(profitRate || 0) / 100
+  const denom = 1 - cr - pr
+  if (denom <= 0) return res.status(400).json({ code: 400, message: '佣金率+利润率必须小于100%' })
+  const price = Math.round(((c + fixed) / denom) * 100) / 100
+  const commission = Math.round(price * cr * 100) / 100
+  const profit = Math.round(price * pr * 100) / 100
+  res.json({
+    code: 200,
+    data: {
+      cost: c, fixed, commissionRate: Number(commissionRate || 0), profitRate: Number(profitRate || 0),
+      suggestPrice: price, commission, profit,
+      margin: Math.round((profit / price) * 10000) / 100,
+      formula: `(${c} + ${fixed}) / (1 - ${commissionRate}% - ${profitRate}%)`,
+    },
+  })
+})
+
+// ---------- 数据备份与恢复 ----------
+app.get('/api/backup/export', authRequired, adminRequired, async (req, res) => {
+  const data = {}
+  for (const key of COLLECTIONS) {
+    if (key === 'users') continue // 不备份账号密码
+    data[key] = await store.all(key)
+  }
+  res.json({ code: 200, data: { exportedAt: new Date().toISOString(), collections: Object.keys(data).length, data } })
+})
+app.post('/api/backup/restore', authRequired, adminRequired, async (req, res) => {
+  const { data, mode } = req.body || {}
+  if (!data || typeof data !== 'object') return res.status(400).json({ code: 400, message: '备份数据格式错误' })
+  let restored = 0, skipped = 0
+  for (const key of Object.keys(data)) {
+    if (!COLLECTIONS.includes(key) || key === 'users') { skipped++; continue }
+    if (!Array.isArray(data[key])) { skipped++; continue }
+    for (const row of data[key]) {
+      const exists = row.id && await store.find(key, row.id)
+      if (exists) { if (mode === 'replace') await store.update(key, row.id, row); else skipped++; }
+      else { await store.create(key, row); restored++ }
+    }
+  }
+  res.json({ code: 200, message: `恢复完成：新增 ${restored}，跳过 ${skipped}`, data: { restored, skipped } })
+})
+
+// ---------- 系统健康监控 ----------
+app.get('/api/system/health', authRequired, adminRequired, async (req, res) => {
+  const counts = {}
+  for (const key of COLLECTIONS) {
+    if (key === 'users') continue
+    counts[key] = (await store.all(key)).length
+  }
+  const [audit, pushLogs, syncLogs] = await Promise.all([store.all('auditLogs'), store.all('pushLogs'), store.all('syncLogs')])
+  const recentErrors = [...pushLogs, ...syncLogs].filter((l) => l.status === '失败' || l.success === false).slice(0, 10)
+  res.json({
+    code: 200,
+    data: {
+      counts,
+      totalRecords: Object.values(counts).reduce((s, n) => s + n, 0),
+      writeOps: audit.length,
+      recentErrors,
+      errorCount: recentErrors.length,
+      serverTime: new Date().toISOString(),
+      uptime: Math.floor(process.uptime()),
+    },
+  })
+})
+
+// ---------- 促销优惠券 ----------
+app.post('/api/coupon/validate', authRequired, adminRequired, async (req, res) => {
+  const { code, amount } = req.body || {}
+  const coupon = (await store.all('coupons')).find((c) => c.code === code)
+  if (!coupon) return res.status(404).json({ code: 404, message: '优惠码不存在' })
+  if (coupon.status !== '启用') return res.status(400).json({ code: 400, message: '优惠券已停用' })
+  if (coupon.expiryDate && coupon.expiryDate < new Date().toISOString().slice(0, 10)) return res.status(400).json({ code: 400, message: '优惠券已过期' })
+  const amt = Number(amount || 0)
+  if (amt < Number(coupon.minAmount || 0)) return res.status(400).json({ code: 400, message: `未达到最低消费 ${coupon.minAmount}` })
+  let discount = 0
+  if (coupon.type === '满减') discount = Number(coupon.value || 0)
+  else if (coupon.type === '折扣') discount = amt * (1 - Number(coupon.value || 1))
+  discount = Math.min(discount, amt)
+  res.json({ code: 200, data: { coupon, discount: Math.round(discount * 100) / 100, payable: Math.round((amt - discount) * 100) / 100 } })
 })
 
 // ---------- 广告投放 ROI 分析 ----------

@@ -30,6 +30,7 @@ export const COLLECTIONS = [
   'automationRules', 'ruleLogs', 'roles', 'notifications', 'afterSales', 'bundles',
   'rfqs', 'qualityChecks', 'batches', 'reports',
   'adCampaigns', 'deals',
+  'shipments_tracking', 'stockLocks', 'coupons',
   'users',
 ]
 const BUSINESS_COLLECTIONS = [
@@ -45,6 +46,7 @@ const BUSINESS_COLLECTIONS = [
   'automationRules', 'ruleLogs', 'roles', 'notifications', 'afterSales', 'bundles',
   'rfqs', 'qualityChecks', 'batches', 'reports',
   'adCampaigns', 'deals',
+  'shipments_tracking', 'stockLocks', 'coupons',
 ]
 
 function emptyDb() {

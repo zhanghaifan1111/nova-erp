@@ -53,6 +53,9 @@ const Reports = lazy(() => import('./pages/Reports'))
 const AdsTransfer = lazy(() => import('./pages/AdsTransfer'))
 const TeamFunnel = lazy(() => import('./pages/TeamFunnel'))
 const GlobalSettings = lazy(() => import('./pages/GlobalSettings'))
+const TrackingSharing = lazy(() => import('./pages/TrackingSharing'))
+const PricingBackup = lazy(() => import('./pages/PricingBackup'))
+const MonitorPromo = lazy(() => import('./pages/MonitorPromo'))
 
 const Loading = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>
@@ -126,6 +129,9 @@ export default function App() {
           <Route path="/ads-transfer" element={<AdminOnly><AdsTransfer /></AdminOnly>} />
           <Route path="/team-funnel" element={<AdminOnly><TeamFunnel /></AdminOnly>} />
           <Route path="/global-settings" element={<AdminOnly><GlobalSettings /></AdminOnly>} />
+          <Route path="/tracking-sharing" element={<AdminOnly><TrackingSharing /></AdminOnly>} />
+          <Route path="/pricing-backup" element={<AdminOnly><PricingBackup /></AdminOnly>} />
+          <Route path="/monitor-promo" element={<AdminOnly><MonitorPromo /></AdminOnly>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

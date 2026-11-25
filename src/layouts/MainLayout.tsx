@@ -54,6 +54,7 @@ const adminMenu = [
       { key: '/shipping-templates', label: '运费模板' },
       { key: '/messages', label: '客户消息聚合' },
       { key: '/ads-transfer', label: '广告 ROI · 智能调拨' },
+      { key: '/tracking-sharing', label: '物流轨迹 · 库存共享' },
     ],
   },
   {
@@ -94,6 +95,8 @@ const adminMenu = [
       { key: '/api-integration', label: 'API 对接 · 订单推送' },
       { key: '/data-io', label: '数据导入导出' },
       { key: '/global-settings', label: '多语言 · 多币种 · 文案' },
+      { key: '/pricing-backup', label: '智能定价 · 数据备份' },
+      { key: '/monitor-promo', label: '系统监控 · 促销券' },
       { key: '/profile', label: '账号设置' },
     ],
   },
@@ -127,17 +130,19 @@ const titleMap: Record<string, string> = {
   '/rfq': '供应商询价比价', '/quality': '质检管理 · 批次追溯', '/reports': '自定义报表设计器',
   '/ads-transfer': '广告 ROI · 智能调拨', '/team-funnel': '员工绩效 · 销售漏斗',
   '/global-settings': '多语言 · 多币种 · 文案助手',
+  '/tracking-sharing': '物流轨迹 · 库存共享', '/pricing-backup': '智能定价 · 数据备份',
+  '/monitor-promo': '系统监控 · 促销优惠券',
 }
 
 const groupKeys: Record<string, string> = {
   '/products': 'grp-product', '/sourcing': 'grp-product', '/listings': 'grp-product',
   '/inventory': 'grp-product', '/stock-flow': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product', '/warehouse-fx': 'grp-product', '/warehouse-intel': 'grp-product', '/quality': 'grp-product',
   '/sales': 'grp-order', '/purchase': 'grp-order', '/shipments': 'grp-order', '/labels': 'grp-order', '/order-sync': 'grp-order', '/after-sales': 'grp-order', '/rfq': 'grp-order',
-  '/shops': 'grp-cross', '/shipping-methods': 'grp-cross', '/shipping-templates': 'grp-cross', '/messages': 'grp-cross', '/ads-transfer': 'grp-cross',
+  '/shops': 'grp-cross', '/shipping-methods': 'grp-cross', '/shipping-templates': 'grp-cross', '/messages': 'grp-cross', '/ads-transfer': 'grp-cross', '/tracking-sharing': 'grp-cross',
   '/finance': 'grp-finance', '/payments': 'grp-finance', '/profit': 'grp-finance', '/pricing': 'grp-finance', '/compliance': 'grp-finance',
   '/gl': 'grp-finance', '/reconciliation': 'grp-finance',
   '/intelligence': 'grp-workflow', '/workflow': 'grp-workflow', '/performance': 'grp-workflow', '/automation': 'grp-workflow', '/reports': 'grp-workflow', '/team-funnel': 'grp-workflow',
-  '/accounts': 'grp-account', '/customer-accounts': 'grp-account', '/profile': 'grp-account', '/rbac': 'grp-account', '/global-settings': 'grp-account',
+  '/accounts': 'grp-account', '/customer-accounts': 'grp-account', '/profile': 'grp-account', '/rbac': 'grp-account', '/global-settings': 'grp-account', '/pricing-backup': 'grp-account', '/monitor-promo': 'grp-account',
   '/api-integration': 'grp-account', '/data-io': 'grp-account',
 }
 

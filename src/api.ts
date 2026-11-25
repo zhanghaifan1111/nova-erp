@@ -112,6 +112,16 @@ export const api = {
   performanceTeam: () => request('/performance/team'),
   funnelStages: () => request('/funnel/stages'),
   titleCheck: (title: string) => request('/copy/title-check', { method: 'POST', body: JSON.stringify({ title }) }),
+  trackingAddEvent: (id: string, body: any) => request('/tracking/add-event/' + id, { method: 'POST', body: JSON.stringify(body) }),
+  trackingExceptions: (days?: number) => request('/tracking/exceptions?days=' + (days || 7)),
+  stockLock: (sku: string, qty: number, orderNo?: string) => request('/stock/lock', { method: 'POST', body: JSON.stringify({ sku, qty, orderNo }) }),
+  stockUnlock: (id: string) => request('/stock/unlock/' + id, { method: 'POST' }),
+  stockAvailability: () => request('/stock/availability'),
+  pricingSuggest: (body: any) => request('/pricing/suggest', { method: 'POST', body: JSON.stringify(body) }),
+  backupExport: () => request('/backup/export'),
+  backupRestore: (data: any, mode?: string) => request('/backup/restore', { method: 'POST', body: JSON.stringify({ data, mode: mode || 'skip' }) }),
+  systemHealth: () => request('/system/health'),
+  couponValidate: (code: string, amount: number) => request('/coupon/validate', { method: 'POST', body: JSON.stringify({ code, amount }) }),
   health: () => request('/health'),
 }
 
