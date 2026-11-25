@@ -31,6 +31,7 @@ const adminMenu = [
       { key: '/stock-transfers', label: '库存调拨' },
       { key: '/warehouse-fx', label: '拣货单 · 汇率' },
       { key: '/warehouse-intel', label: '库位 · 销售预测' },
+      { key: '/quality', label: '质检 · 批次追溯' },
     ],
   },
   {
@@ -40,6 +41,7 @@ const adminMenu = [
       { key: '/purchase', label: '采购订单' },
       { key: '/shipments', label: '打单发货' },
       { key: '/labels', label: '箱唛 · 面单打印' },
+      { key: '/rfq', label: '供应商询价比价' },
       { key: '/after-sales', label: '售后服务 · BOM' },
       { key: '/order-sync', label: '多平台订单同步' },
     ],
@@ -72,6 +74,7 @@ const adminMenu = [
       { key: '/workflow', label: '审批中心 · 报销' },
       { key: '/performance', label: 'KPI · 预警中心' },
       { key: '/automation', label: '自动化规则引擎' },
+      { key: '/reports', label: '自定义报表' },
     ],
   },
   { type: 'divider' as const },
@@ -118,16 +121,17 @@ const titleMap: Record<string, string> = {
   '/performance': 'KPI 目标 · 预警中心',
   '/automation': '自动化规则引擎', '/notifications': '通知中心', '/rbac': 'RBAC 角色权限',
   '/after-sales': '售后服务 · 组合商品 BOM',
+  '/rfq': '供应商询价比价', '/quality': '质检管理 · 批次追溯', '/reports': '自定义报表设计器',
 }
 
 const groupKeys: Record<string, string> = {
   '/products': 'grp-product', '/sourcing': 'grp-product', '/listings': 'grp-product',
-  '/inventory': 'grp-product', '/stock-flow': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product', '/warehouse-fx': 'grp-product', '/warehouse-intel': 'grp-product',
-  '/sales': 'grp-order', '/purchase': 'grp-order', '/shipments': 'grp-order', '/labels': 'grp-order', '/order-sync': 'grp-order', '/after-sales': 'grp-order',
+  '/inventory': 'grp-product', '/stock-flow': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product', '/warehouse-fx': 'grp-product', '/warehouse-intel': 'grp-product', '/quality': 'grp-product',
+  '/sales': 'grp-order', '/purchase': 'grp-order', '/shipments': 'grp-order', '/labels': 'grp-order', '/order-sync': 'grp-order', '/after-sales': 'grp-order', '/rfq': 'grp-order',
   '/shops': 'grp-cross', '/shipping-methods': 'grp-cross', '/shipping-templates': 'grp-cross', '/messages': 'grp-cross',
   '/finance': 'grp-finance', '/payments': 'grp-finance', '/profit': 'grp-finance', '/pricing': 'grp-finance', '/compliance': 'grp-finance',
   '/gl': 'grp-finance', '/reconciliation': 'grp-finance',
-  '/intelligence': 'grp-workflow', '/workflow': 'grp-workflow', '/performance': 'grp-workflow', '/automation': 'grp-workflow',
+  '/intelligence': 'grp-workflow', '/workflow': 'grp-workflow', '/performance': 'grp-workflow', '/automation': 'grp-workflow', '/reports': 'grp-workflow',
   '/accounts': 'grp-account', '/customer-accounts': 'grp-account', '/profile': 'grp-account', '/rbac': 'grp-account',
   '/api-integration': 'grp-account', '/data-io': 'grp-account',
 }
@@ -140,8 +144,31 @@ export default function MainLayout() {
   const { dark, toggle } = useAppTheme()
   const { token } = antdTheme.useToken()
   const { user, logout, isAdmin } = useAuth()
+  const [allowedMenus, setAllowedMenus] = useState<string[] | null>(null)
 
-  const menuItems = isAdmin ? adminMenu : customerMenu
+  // RBAC：按角色白名单过滤菜单（admin 或 roleKey=admin 看全部）
+  useEffect(() => {
+    if (!isAdmin) { setAllowedMenus(null); return }
+    const roleKey = user?.roleKey
+    if (!roleKey || roleKey === 'admin') { setAllowedMenus(null); return }
+    api.list('roles').then((r: any) => {
+      const role = r.data.find((x: any) => x.key === roleKey && x.status === '启用')
+      setAllowedMenus(role?.menus || [])
+    }).catch(() => setAllowedMenus(null))
+  }, [isAdmin, user?.roleKey])
+
+  const filterByAllow = (items: any[]): any[] => {
+    if (!allowedMenus) return items
+    return items.map((item: any) => {
+      if (item.children) {
+        const kids = item.children.filter((c: any) => allowedMenus.includes(c.key))
+        return kids.length ? { ...item, children: kids } : null
+      }
+      return allowedMenus.includes(item.key) ? item : null
+    }).filter(Boolean)
+  }
+
+  const menuItems = isAdmin ? filterByAllow(adminMenu) : customerMenu
   const title = titleMap[location.pathname] || (location.pathname === '/profile' ? '账号设置' : '周桂祥的ERP')
 
   useEffect(() => {
@@ -195,7 +222,7 @@ export default function MainLayout() {
             <Tooltip title={dark ? '切换浅色' : '切换深色'}>
               <Button type="text" icon={dark ? <SunOutlined /> : <MoonOutlined />} onClick={toggle} />
             </Tooltip>
-            <Tooltip title="通知"><Button type="text" icon={<BellOutlined />} /></Tooltip>
+            <Tooltip title="通知中心"><Button type="text" icon={<BellOutlined />} onClick={() => navigate('/notifications')} /></Tooltip>
             <Dropdown menu={userMenu} placement="bottomRight">
               <div className="avatar-wrap" style={{ cursor: 'pointer' }}>
                 <Avatar style={{ background: 'linear-gradient(135deg,#4f6ef7,#7c5cff)' }}>{user?.name?.[0] || 'U'}</Avatar>

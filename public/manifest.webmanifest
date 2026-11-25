@@ -1,0 +1,13 @@
+{
+  "name": "周桂祥的ERP · 智能企业管理平台",
+  "short_name": "周氏ERP",
+  "description": "跨境电商 ERP — 进销存、订单、财务、智能分析一站式管理",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1420",
+  "theme_color": "#4f6ef7",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

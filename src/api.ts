@@ -102,6 +102,11 @@ export const api = {
   portalSummary: () => request('/portal/summary'),
   bomCalc: (bundleId: string, qty: number) => request('/bom/calc', { method: 'POST', body: JSON.stringify({ bundleId, qty }) }),
   afterSalesProcess: (id: string, status: string, solution?: string) => request('/after-sales/process/' + id, { method: 'POST', body: JSON.stringify({ status, solution }) }),
+  rfqAward: (id: string, quoteId: string) => request('/rfq/award/' + id, { method: 'POST', body: JSON.stringify({ quoteId }) }),
+  rfqCompare: (id: string) => request('/rfq/compare/' + id),
+  qcJudge: (id: string, result: string, passQty?: number, note?: string) => request('/qc/judge/' + id, { method: 'POST', body: JSON.stringify({ result, passQty, note }) }),
+  batchTrace: (batchNo: string) => request('/batch/trace/' + batchNo),
+  reportRun: (body: any) => request('/report/run', { method: 'POST', body: JSON.stringify(body) }),
   health: () => request('/health'),
 }
 

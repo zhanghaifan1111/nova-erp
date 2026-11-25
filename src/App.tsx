@@ -47,6 +47,9 @@ const Automation = lazy(() => import('./pages/Automation'))
 const NotificationsPage = lazy(() => import('./pages/NotificationsPage'))
 const Rbac = lazy(() => import('./pages/Rbac'))
 const ServiceBom = lazy(() => import('./pages/ServiceBom'))
+const Rfq = lazy(() => import('./pages/Rfq'))
+const QualityTrace = lazy(() => import('./pages/QualityTrace'))
+const Reports = lazy(() => import('./pages/Reports'))
 
 const Loading = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>
@@ -114,6 +117,9 @@ export default function App() {
           <Route path="/notifications" element={<AdminOnly><NotificationsPage /></AdminOnly>} />
           <Route path="/rbac" element={<AdminOnly><Rbac /></AdminOnly>} />
           <Route path="/after-sales" element={<AdminOnly><ServiceBom /></AdminOnly>} />
+          <Route path="/rfq" element={<AdminOnly><Rfq /></AdminOnly>} />
+          <Route path="/quality" element={<AdminOnly><QualityTrace /></AdminOnly>} />
+          <Route path="/reports" element={<AdminOnly><Reports /></AdminOnly>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

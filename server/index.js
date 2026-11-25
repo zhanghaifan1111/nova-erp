@@ -189,6 +189,7 @@ const COLLECTIONS = [
   'approvals', 'expenses', 'invoices', 'auditLogs', 'locations',
   'glAccounts', 'vouchers', 'settlements', 'kpiTargets',
   'automationRules', 'ruleLogs', 'roles', 'notifications', 'afterSales', 'bundles',
+  'rfqs', 'qualityChecks', 'batches', 'reports',
 ]
 
 function scopeRows(req, key, rows) {
@@ -433,6 +434,100 @@ app.post('/api/messages/:id/reply', authRequired, async (req, res) => {
   replies.push({ content: String(content).trim(), at: new Date().toISOString(), by: req.user?.name || req.user?.username || '系统' })
   const rec = await store.update('messages', msg.id, { status: '已回复', replies, repliedAt: new Date().toISOString().slice(0, 10) })
   res.json({ code: 200, message: '回复成功', data: rec })
+})
+
+// ---------- RFQ 询价比价 ----------
+// 选中标报价 → 生成采购单
+app.post('/api/rfq/award/:id', authRequired, adminRequired, async (req, res) => {
+  const rfq = await store.find('rfqs', req.params.id)
+  if (!rfq) return res.status(404).json({ code: 404, message: '询价单不存在' })
+  if (rfq.status === '已完成') return res.status(400).json({ code: 400, message: '该询价单已完成' })
+  const { quoteId } = req.body || {}
+  const quote = (rfq.quotes || []).find((q) => q.id === quoteId)
+  if (!quote) return res.status(404).json({ code: 404, message: '报价不存在' })
+  const po = await store.create('purchaseOrders', {
+    orderNo: 'PO-RFQ-' + Date.now().toString().slice(-6),
+    supplierName: quote.supplierName || '',
+    items: rfq.items && rfq.items.length
+      ? rfq.items.map((it) => ({ sku: it.sku, name: it.name, qty: Number(it.qty || 1), price: Number(quote.unitPrice || 0) }))
+      : [{ sku: rfq.sku || '', name: rfq.productName || '询价商品', qty: Number(rfq.qty || 1), price: Number(quote.unitPrice || 0) }],
+    total: Math.round((rfq.items && rfq.items.length
+      ? rfq.items.reduce((s, it) => s + Number(it.qty || 1) * Number(quote.unitPrice || 0), 0)
+      : Number(rfq.qty || 1) * Number(quote.unitPrice || 0)) * 100) / 100,
+    status: '待审批', source: `询价比价:${rfq.rfqNo || ''}`,
+  })
+  await store.update('rfqs', rfq.id, { status: '已完成', awardedQuoteId: quoteId, awardedSupplier: quote.supplierName, purchaseNo: po.orderNo })
+  res.json({ code: 200, message: `已授标给 ${quote.supplierName}，采购单 ${po.orderNo} 已生成`, data: po })
+})
+
+// 比价：把各家报价按总价排序
+app.get('/api/rfq/compare/:id', authRequired, adminRequired, async (req, res) => {
+  const rfq = await store.find('rfqs', req.params.id)
+  if (!rfq) return res.status(404).json({ code: 404, message: '询价单不存在' })
+  const totalQty = rfq.items && rfq.items.length
+    ? rfq.items.reduce((s, it) => s + Number(it.qty || 1), 0)
+    : Number(rfq.qty || 1)
+  const rows = (rfq.quotes || []).map((q) => ({
+    ...q,
+    totalAmount: Math.round(Number(q.unitPrice || 0) * totalQty * 100) / 100,
+  })).sort((a, b) => a.totalAmount - b.totalAmount)
+  res.json({ code: 200, data: { rows, totalQty, best: rows[0] || null } })
+})
+
+// ---------- 质检管理 ----------
+// 质检判定：合格 → 联动入库（增加库存+流水）；不合格 → 退货流程提示
+app.post('/api/qc/judge/:id', authRequired, adminRequired, async (req, res) => {
+  const qc = await store.find('qualityChecks', req.params.id)
+  if (!qc) return res.status(404).json({ code: 404, message: '质检单不存在' })
+  if (['合格', '不合格'].includes(qc.status)) return res.status(400).json({ code: 400, message: '该质检单已判定' })
+  const { result, passQty, note } = req.body || {}
+  if (!['合格', '不合格'].includes(result)) return res.status(400).json({ code: 400, message: '判定必须是合格或不合格' })
+  const patch = { status: result, result, note: note || '', checkedAt: new Date().toISOString().slice(0, 10) }
+  if (result === '合格') {
+    const pid = qc.productId
+    const qty = Number(passQty ?? qc.qty ?? 0)
+    if (pid && qty > 0) {
+      const product = await store.find('products', pid)
+      if (product) {
+        await store.update('products', pid, { stock: Number(product.stock || 0) + qty })
+        await store.create('stockLogs', {
+          type: '入库', productId: pid, sku: product.sku || '', name: product.name || '',
+          qty, relatedNo: qc.qcNo || '', note: '质检合格入库',
+        })
+        patch.stockedQty = qty
+      }
+    }
+  } else {
+    await notify(`[质检不合格] ${qc.qcNo || ''}`, `${qc.sku || ''} ${note || '需退货处理'}`, '质检', '/quality')
+  }
+  await store.update('qualityChecks', qc.id, patch)
+  res.json({ code: 200, message: result === '合格' ? '质检合格，库存已入库' : '已标记不合格并通知' })
+})
+
+// ---------- 批次追溯 ----------
+// 按批次号查询相关出入库流水
+app.get('/api/batch/trace/:batchNo', authRequired, adminRequired, async (req, res) => {
+  const batchNo = req.params.batchNo
+  const batch = (await store.all('batches')).find((b) => b.batchNo === batchNo)
+  if (!batch) return res.status(404).json({ code: 404, message: '批次不存在' })
+  const logs = (await store.all('stockLogs')).filter((l) => l.relatedNo === batchNo || l.batchNo === batchNo)
+  res.json({ code: 200, data: { batch, logs, traceCount: logs.length } })
+})
+
+// ---------- 自定义报表 ----------
+// 动态查询：从白名单集合按选定字段与筛选条件生成数据
+app.post('/api/report/run', authRequired, adminRequired, async (req, res) => {
+  const { collection, fields, filters } = req.body || {}
+  const allowed = ['products', 'customers', 'suppliers', 'salesOrders', 'purchaseOrders', 'stockLogs', 'payments', 'settlements', 'invoices', 'expenses']
+  if (!allowed.includes(collection)) return res.status(400).json({ code: 400, message: '该数据源不支持报表' })
+  let rows = await store.all(collection)
+  for (const f of (filters || [])) {
+    if (!f.field || f.value === '' || f.value == null) continue
+    rows = rows.filter((r) => String(r[f.field] ?? '').toLowerCase().includes(String(f.value).toLowerCase()))
+  }
+  const cols = Array.isArray(fields) && fields.length ? fields : Object.keys(rows[0] || {}).filter((k) => k !== '_id').slice(0, 12)
+  const data = rows.map((r) => Object.fromEntries(cols.map((c) => [c, r[c] ?? ''])))
+  res.json({ code: 200, data: { columns: cols, rows: data, total: data.length } })
 })
 
 // ---------- 自动化规则引擎 ----------
