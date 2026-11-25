@@ -50,6 +50,9 @@ const ServiceBom = lazy(() => import('./pages/ServiceBom'))
 const Rfq = lazy(() => import('./pages/Rfq'))
 const QualityTrace = lazy(() => import('./pages/QualityTrace'))
 const Reports = lazy(() => import('./pages/Reports'))
+const AdsTransfer = lazy(() => import('./pages/AdsTransfer'))
+const TeamFunnel = lazy(() => import('./pages/TeamFunnel'))
+const GlobalSettings = lazy(() => import('./pages/GlobalSettings'))
 
 const Loading = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>
@@ -120,6 +123,9 @@ export default function App() {
           <Route path="/rfq" element={<AdminOnly><Rfq /></AdminOnly>} />
           <Route path="/quality" element={<AdminOnly><QualityTrace /></AdminOnly>} />
           <Route path="/reports" element={<AdminOnly><Reports /></AdminOnly>} />
+          <Route path="/ads-transfer" element={<AdminOnly><AdsTransfer /></AdminOnly>} />
+          <Route path="/team-funnel" element={<AdminOnly><TeamFunnel /></AdminOnly>} />
+          <Route path="/global-settings" element={<AdminOnly><GlobalSettings /></AdminOnly>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

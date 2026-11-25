@@ -190,6 +190,7 @@ const COLLECTIONS = [
   'glAccounts', 'vouchers', 'settlements', 'kpiTargets',
   'automationRules', 'ruleLogs', 'roles', 'notifications', 'afterSales', 'bundles',
   'rfqs', 'qualityChecks', 'batches', 'reports',
+  'adCampaigns', 'deals',
 ]
 
 function scopeRows(req, key, rows) {
@@ -434,6 +435,153 @@ app.post('/api/messages/:id/reply', authRequired, async (req, res) => {
   replies.push({ content: String(content).trim(), at: new Date().toISOString(), by: req.user?.name || req.user?.username || '系统' })
   const rec = await store.update('messages', msg.id, { status: '已回复', replies, repliedAt: new Date().toISOString().slice(0, 10) })
   res.json({ code: 200, message: '回复成功', data: rec })
+})
+
+// ---------- 广告投放 ROI 分析 ----------
+// ACOS = 广告花费/广告销售额；ROAS = 广告销售额/花费；ROI = 毛利/花费
+app.get('/api/ads/roi', authRequired, adminRequired, async (req, res) => {
+  const [campaigns, sales, products] = await Promise.all([store.all('adCampaigns'), store.all('salesOrders'), store.all('products')])
+  const productMap = Object.fromEntries(products.map((p) => [p.id, p]))
+  const rows = campaigns.map((c) => {
+    const spend = Number(c.spend || 0)
+    const clicks = Number(c.clicks || 0)
+    const orders = Number(c.orders || 0)
+    // 广告销售额：优先用手填的 adSales，否则找同SKU的销售订单金额
+    let adSales = Number(c.adSales || 0)
+    if (!adSales && c.sku) {
+      adSales = sales.filter((o) => o.status !== '已取消' && (o.items || []).some((it) => it.sku === c.sku))
+        .reduce((s, o) => s + Number((o.items || []).filter((it) => it.sku === c.sku).reduce((t, it) => t + Number(it.qty || 0) * Number(it.price || 0), 0)), 0)
+    }
+    const acos = adSales > 0 ? Math.round((spend / adSales) * 10000) / 100 : null
+    const roas = spend > 0 ? Math.round((adSales / spend) * 100) / 100 : null
+    const roi = spend > 0 ? Math.round(((adSales - spend) / spend) * 100) / 100 : null
+    return {
+      id: c.id, name: c.name || '', platform: c.platform || '', sku: c.sku || '',
+      spend, clicks, orders, adSales: Math.round(adSales * 100) / 100,
+      cpc: clicks > 0 ? Math.round((spend / clicks) * 100) / 100 : null,
+      acos, roas, roi,
+      health: acos == null ? '无数据' : acos <= 20 ? '优秀' : acos <= 35 ? '良好' : acos <= 50 ? '一般' : '亏损',
+    }
+  })
+  const totalSpend = rows.reduce((s, r) => s + r.spend, 0)
+  const totalSales = rows.reduce((s, r) => s + r.adSales, 0)
+  res.json({
+    code: 200,
+    data: {
+      rows,
+      sum: {
+        spend: Math.round(totalSpend * 100) / 100,
+        adSales: Math.round(totalSales * 100) / 100,
+        acos: totalSales > 0 ? Math.round((totalSpend / totalSales) * 10000) / 100 : null,
+        roas: totalSpend > 0 ? Math.round((totalSales / totalSpend) * 100) / 100 : null,
+      },
+    },
+  })
+})
+
+// ---------- 智能调拨建议 ----------
+// 按各仓库存与近30天销量算：哪些仓缺货、哪些仓积压，建议从哪调到哪
+app.get('/api/transfer/suggest', authRequired, adminRequired, async (req, res) => {
+  const [products, warehouses, sales, stockTransfers] = await Promise.all([
+    store.all('products'), store.all('warehouses'), store.all('salesOrders'), store.all('stockTransfers'),
+  ])
+  const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+  // 近30天各SKU销量
+  const sold = {}
+  sales.filter((o) => (o.orderDate || '') >= cutoff && o.status !== '已取消')
+    .forEach((o) => (o.items || []).forEach((it) => { if (it.sku) sold[it.sku] = (sold[it.sku] || 0) + Number(it.qty || 0) }))
+  // 各仓各SKU库存：从 locations/库存明细找 warehouseId；若无明细，用商品的 warehouse 字段
+  const inv = {}
+  products.forEach((p) => {
+    const wh = p.warehouse || p.warehouseName || warehouses[0]?.name || '主仓'
+    const key = `${wh}|${p.sku}`
+    inv[key] = (inv[key] || 0) + Number(p.stock || 0)
+  })
+  // 按SKU汇总各仓库存
+  const bySku = {}
+  Object.entries(inv).forEach(([key, qty]) => {
+    const [wh, sku] = key.split('|')
+    ;(bySku[sku] || (bySku[sku] = [])) .push({ warehouse: wh, qty })
+  })
+  const suggestions = []
+  Object.entries(bySku).forEach(([sku, whs]) => {
+    if (whs.length < 2) return // 至少需要两个仓才能调拨
+    const demand = sold[sku] || 0
+    const sorted = [...whs].sort((a, b) => b.qty - a.qty)
+    const from = sorted[0], to = sorted[sorted.length - 1]
+    if (from.qty > demand * 1.5 && to.qty < demand * 0.5 && from.qty > to.qty) {
+      const qty = Math.min(Math.floor((from.qty - to.qty) / 2), Math.max(demand, 10))
+      suggestions.push({
+        sku, name: (products.find((p) => p.sku === sku)?.name) || '',
+        demand, fromWarehouse: from.warehouse, fromQty: from.qty,
+        toWarehouse: to.warehouse, toQty: to.qty,
+        suggestQty: qty,
+        reason: `调出仓库存充裕（${from.qty}），调入仓偏低（${to.qty}），近30天销量 ${demand}`,
+      })
+    }
+  })
+  res.json({ code: 200, data: { rows: suggestions, warehouses: warehouses.length } })
+})
+
+// ---------- 员工绩效 ----------
+// 按销售订单的 owner/operator 字段统计员工业绩
+app.get('/api/performance/team', authRequired, adminRequired, async (req, res) => {
+  const [sales, users] = await Promise.all([store.all('salesOrders'), store.all('users')])
+  const stats = {}
+  sales.filter((o) => o.status !== '已取消').forEach((o) => {
+    const owner = o.owner || o.operator || o.salesperson || '未分配'
+    const s = stats[owner] || (stats[owner] = { name: owner, orders: 0, amount: 0 })
+    s.orders++
+    s.amount += Number(o.total || 0)
+  })
+  const rows = Object.values(stats).map((s) => ({
+    ...s, amount: Math.round(s.amount * 100) / 100,
+    avg: Math.round((s.amount / Math.max(1, s.orders)) * 100) / 100,
+  })).sort((a, b) => b.amount - a.amount)
+  rows.forEach((r, i) => { r.rank = i + 1 })
+  res.json({ code: 200, data: { rows, total: rows.length } })
+})
+
+// ---------- 销售漏斗 ----------
+// 按商机阶段统计数量与金额（用 followUps 的 stage + 客户跟进）
+app.get('/api/funnel/stages', authRequired, adminRequired, async (req, res) => {
+  const [followUps, deals] = await Promise.all([store.all('followUps'), store.all('deals')])
+  const stages = ['初步接触', '需求确认', '报价中', '谈判中', '已成交', '已流失']
+  const rows = stages.map((stage) => {
+    const fs = followUps.filter((f) => f.stage === stage)
+    const ds = deals.filter((d) => d.stage === stage)
+    return {
+      stage,
+      count: fs.length + ds.length,
+      amount: Math.round(ds.reduce((s, d) => s + Number(d.amount || 0), 0) * 100) / 100,
+    }
+  })
+  res.json({ code: 200, data: { rows } })
+})
+
+// ---------- 商品标题优化建议 ----------
+app.post('/api/copy/title-check', authRequired, adminRequired, async (req, res) => {
+  const { title } = req.body || {}
+  if (!title || typeof title !== 'string') return res.status(400).json({ code: 400, message: '请提供标题' })
+  const issues = []
+  const suggestions = []
+  const len = title.trim().length
+  if (len < 20) issues.push('标题过短（建议 20-100 字符）')
+  if (len > 120) issues.push('标题过长（部分平台限制 100-120 字符）')
+  if (/\s{2,}/.test(title)) issues.push('存在连续空格')
+  if (/(免费|最|第一|绝对|100%|最便宜)/.test(title)) issues.push('含平台违禁词（最/第一/100% 等）')
+  if (!/[0-9]/.test(title)) suggestions.push('加入规格/型号数字提升搜索命中')
+  const words = title.trim().split(/\s+/).filter((w) => w.length > 2)
+  if (words.length < 4) suggestions.push('增加核心关键词（当前词数偏少）')
+  const hasBrand = /[A-Z]{2,}/.test(title)
+  if (!hasBrand) suggestions.push('如有品牌名建议前置')
+  res.json({
+    code: 200,
+    data: {
+      length: len, score: Math.max(0, 100 - issues.length * 15 - suggestions.length * 5),
+      issues, suggestions,
+    },
+  })
 })
 
 // ---------- RFQ 询价比价 ----------

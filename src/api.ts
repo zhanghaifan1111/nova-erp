@@ -107,8 +107,27 @@ export const api = {
   qcJudge: (id: string, result: string, passQty?: number, note?: string) => request('/qc/judge/' + id, { method: 'POST', body: JSON.stringify({ result, passQty, note }) }),
   batchTrace: (batchNo: string) => request('/batch/trace/' + batchNo),
   reportRun: (body: any) => request('/report/run', { method: 'POST', body: JSON.stringify(body) }),
+  adsRoi: () => request('/ads/roi'),
+  transferSuggest: () => request('/transfer/suggest'),
+  performanceTeam: () => request('/performance/team'),
+  funnelStages: () => request('/funnel/stages'),
+  titleCheck: (title: string) => request('/copy/title-check', { method: 'POST', body: JSON.stringify({ title }) }),
   health: () => request('/health'),
 }
 
-export const money = (n: number) =>
-  '¥' + Number(n || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// 全局显示币种设置：存 localStorage，设置页切换后所有金额显示自动换算
+export type CurrencySetting = { code: string; symbol: string; rate: number } // rate = 1 外币兑多少人民币
+export const getDisplayCurrency = (): CurrencySetting => {
+  try {
+    const raw = localStorage.getItem('nova-display-currency')
+    if (raw) return JSON.parse(raw)
+  } catch { /* ignore */ }
+  return { code: 'CNY', symbol: '¥', rate: 1 }
+}
+export const setDisplayCurrency = (c: CurrencySetting) => localStorage.setItem('nova-display-currency', JSON.stringify(c))
+
+export const money = (n: number) => {
+  const cur = getDisplayCurrency()
+  const value = cur.code === 'CNY' ? Number(n || 0) : Number(n || 0) / (cur.rate || 1)
+  return cur.symbol + value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
