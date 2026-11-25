@@ -192,6 +192,7 @@ const COLLECTIONS = [
   'rfqs', 'qualityChecks', 'batches', 'reports',
   'adCampaigns', 'deals',
   'shipments_tracking', 'stockLocks', 'coupons',
+  'csRules', 'blacklist', 'products_research', 'competitors',
 ]
 
 function scopeRows(req, key, rows) {
@@ -436,6 +437,147 @@ app.post('/api/messages/:id/reply', authRequired, async (req, res) => {
   replies.push({ content: String(content).trim(), at: new Date().toISOString(), by: req.user?.name || req.user?.username || '系统' })
   const rec = await store.update('messages', msg.id, { status: '已回复', replies, repliedAt: new Date().toISOString().slice(0, 10) })
   res.json({ code: 200, message: '回复成功', data: rec })
+})
+
+// ---------- AI 工具箱（对标店小秘，本地规则引擎，无外部API依赖） ----------
+// 违禁词库（按平台）
+const BANNED_WORDS = {
+  通用: ['最好', '第一', '最佳', '绝对', '100%', '全网最低', '最便宜', '顶级', '唯一', '永久', '包治', '特效', '国家级', '驰名商标'],
+  亚马逊: ['best', 'No.1', 'number one', 'cheapest', '100% safe', 'guaranteed', 'free gift', 'sale', 'discount', 'review'],
+  Shopee: ['最好', '最便宜', '第一', '100%正品', '绝对正品', '国家级'],
+  TikTok: ['最好', '第一', '全网最低', '100%有效', '绝对'],
+}
+// AI 描述生成：基于产品名+卖点+关键词，模板化生成结构化描述
+app.post('/api/ai/description', authRequired, adminRequired, async (req, res) => {
+  const { name, keywords, sellingPoints, category, language, tone } = req.body || {}
+  if (!name) return res.status(400).json({ code: 400, message: '请提供产品名称' })
+  const kws = Array.isArray(keywords) ? keywords.filter(Boolean) : String(keywords || '').split(/[,，、]/).map((s) => s.trim()).filter(Boolean)
+  const points = Array.isArray(sellingPoints) ? sellingPoints.filter(Boolean) : String(sellingPoints || '').split(/[,，、]/).map((s) => s.trim()).filter(Boolean)
+  const lang = language || 'zh'
+  const isEn = lang === 'en'
+  const t = (zh, en) => isEn ? en : zh
+  const titleKws = kws.slice(0, 4)
+  const title = isEn
+    ? `${name} ${titleKws.join(' ')} ${tone === 'professional' ? 'Premium Quality' : 'For Everyday Use'}`.trim()
+    : `${name} ${titleKws.join(' ')} ${tone === 'professional' ? '高品质精选' : '日常实用款'}`.trim()
+  const bullets = points.length ? points : [
+    t('优质材料，耐用可靠，长期使用不变形', 'Premium material, durable and built to last'),
+    t('人性化设计，操作简单，新手也能轻松上手', 'User-friendly design, easy to use even for beginners'),
+    t('多场景适用，满足日常各种需求', 'Versatile for multiple scenarios and daily needs'),
+  ]
+  const description = [
+    t(`【${category || '优选好物'}】${name}`, `[${category || 'Featured'}] ${name}`),
+    '',
+    t('产品亮点：', 'Key Features:'),
+    ...bullets.map((p, i) => `${isEn ? '•' : '✦'} ${p}`),
+    '',
+    t('产品规格：', 'Specifications:'),
+    t(`· 商品名称：${name}`, `· Product: ${name}`),
+    t(`· 核心关键词：${kws.join(' / ') || '—'}`, `· Keywords: ${kws.join(' / ') || '—'}`),
+    t(`· 适用场景：${category || '日常家用 / 办公 / 出行'}`, `· Application: ${category || 'Home / Office / Travel'}`),
+    '',
+    t('为什么选择我们？我们专注于每一处细节，从选材到出厂严格把关，只为给你更好的使用体验。现货速发，售后无忧，放心购买。', 'Why choose us? We focus on every detail, from material selection to strict quality control. Fast shipping and worry-free after-sales.'),
+  ].join('\n')
+  res.json({ code: 200, data: { title, description, bullets, language: lang, wordCount: description.length } })
+})
+
+// 一键翻译：电商常用词词典（本地可运行，非完整机器翻译）
+const DICT = {
+  zh2en: {
+    '手机壳': 'Phone Case', '蓝牙耳机': 'Bluetooth Earbuds', '移动电源': 'Power Bank', '充电宝': 'Power Bank',
+    '数据线': 'Charging Cable', '保护套': 'Protective Cover', '防水': 'Waterproof', '便携': 'Portable',
+    '无线': 'Wireless', '高品质': 'Premium Quality', '耐用': 'Durable', '实用': 'Practical', '精选': 'Selected',
+    '材料': 'Material', '设计': 'Design', '适用': 'Suitable for', '颜色': 'Color', '尺寸': 'Size',
+    '高品质精选': 'Premium Selection', '日常实用款': 'For Everyday Use', '产品亮点': 'Key Features',
+    '产品规格': 'Specifications', '商品名称': 'Product Name', '核心关键词': 'Key Words', '适用场景': 'Application',
+    '优质材料，耐用可靠': 'Premium material, durable and reliable', '操作简单': 'Easy operation',
+    '多场景适用': 'Suitable for multiple scenarios', '现货速发': 'Fast shipping', '售后无忧': 'Worry-free after-sales',
+  },
+  zh2ja: { '手机壳': 'スマホケース', '蓝牙耳机': 'ワイヤレスイヤホン', '移动电源': 'モバイルバッテリー', '防水': '防水', '便携': 'ポータブル', '无线': 'ワイヤレス', '高品质': '高品質', '耐用': '耐久性', '实用': '実用', '颜色': 'カラー', '尺寸': 'サイズ' },
+  zh2ko: { '手机壳': '휴대폰 케이스', '蓝牙耳机': '무선 이어폰', '移动电源': '보조배터리', '防水': '방수', '便携': '휴대용', '无线': '무선', '高品质': '고품질', '耐用': '내구성', '实用': '실용적', '颜色': '색상', '尺寸': '크기' },
+}
+app.post('/api/ai/translate', authRequired, adminRequired, async (req, res) => {
+  const { text, from, to } = req.body || {}
+  if (!text) return res.status(400).json({ code: 400, message: '请提供要翻译的文本' })
+  const key = `${from || 'zh'}2${to || 'en'}`
+  const dict = DICT[key] || DICT.zh2en
+  let result = String(text)
+  // 长句优先替换
+  const entries = Object.entries(dict).sort((a, b) => b[0].length - a[0].length)
+  for (const [zh, en] of entries) result = result.split(zh).join(en)
+  const hitRate = Object.keys(dict).filter((k) => text.includes(k)).length
+  res.json({ code: 200, data: { original: text, translated: result, from: from || 'zh', to: to || 'en', mode: 'dictionary', matchedTerms: hitRate } })
+})
+
+// 违禁词检测强化（对标店小秘合规检测）
+app.post('/api/ai/compliance', authRequired, adminRequired, async (req, res) => {
+  const { text, platform } = req.body || {}
+  if (!text) return res.status(400).json({ code: 400, message: '请提供检测文本' })
+  const groups = [...(BANNED_WORDS['通用'] || []), ...(BANNED_WORDS[platform] || [])]
+  const found = []
+  for (const word of groups) {
+    if (String(text).toLowerCase().includes(word.toLowerCase())) found.push(word)
+  }
+  res.json({
+    code: 200,
+    data: {
+      passed: found.length === 0,
+      found,
+      count: found.length,
+      platform: platform || '通用',
+      suggestion: found.length ? `建议删除或替换：${found.join('、')}` : '合规检测通过，未发现违禁词',
+    },
+  })
+})
+
+// ---------- 智能客服：自动回复规则 + 云黑名单 ----------
+// 用消息内容匹配规则关键词，返回建议回复
+app.post('/api/cs/auto-reply', authRequired, adminRequired, async (req, res) => {
+  const { message } = req.body || {}
+  if (!message) return res.status(400).json({ code: 400, message: '请提供消息内容' })
+  const [rules, blacklist] = await Promise.all([store.all('csRules'), store.all('blacklist')])
+  // 黑名单拦截
+  const blocked = blacklist.find((b) => b.active !== '否' && b.active !== false && message.toLowerCase().includes(String(b.keyword || '').toLowerCase()))
+  if (blocked) return res.json({ code: 200, data: { blocked: true, reply: '', rule: blocked, reason: '命中云黑名单' } })
+  // 关键词匹配规则（按优先级）
+  // keywords 可能是数组（API创建）或逗号分隔字符串（CrudPage表单），统一处理
+  const kwList = (r) => Array.isArray(r.keywords) ? r.keywords : String(r.keywords || '').split(/[,，、]/).map((s) => s.trim()).filter(Boolean)
+  const matched = rules.filter((r) => r.enabled !== '停用' && kwList(r).some((k) => message.toLowerCase().includes(String(k).toLowerCase())))
+    .sort((a, b) => Number(b.priority || 0) - Number(a.priority || 0))[0]
+  res.json({
+    code: 200,
+    data: {
+      blocked: false,
+      matched: !!matched,
+      reply: matched ? matched.reply : '',
+      rule: matched || null,
+      category: matched?.category || '未匹配',
+    },
+  })
+})
+
+// ---------- 选品开发：爆款评分 ----------
+// 综合评分 = 销量分40% + 增速分30% + 利润分20% + 低竞争分10%
+app.post('/api/research/score', authRequired, adminRequired, async (req, res) => {
+  const { rows } = req.body || {}
+  if (!Array.isArray(rows)) return res.status(400).json({ code: 400, message: '请提供选品数据数组' })
+  const maxSales = Math.max(...rows.map((r) => Number(r.sales || 0)), 1)
+  const maxGrowth = Math.max(...rows.map((r) => Number(r.growth || 0)), 1)
+  const scored = rows.map((r) => {
+    const sales = Number(r.sales || 0), growth = Number(r.growth || 0)
+    const margin = Number(r.margin || 0) // 利润率%
+    const competition = Number(r.competition || 5) // 竞争度1-10，越低越好
+    const salesScore = Math.min(100, sales / maxSales * 100)
+    const growthScore = Math.min(100, growth / maxGrowth * 100)
+    const marginScore = Math.min(100, margin * 2)
+    const compScore = Math.max(0, (10 - competition) * 10)
+    const score = Math.round(salesScore * 0.4 + growthScore * 0.3 + marginScore * 0.2 + compScore * 0.1)
+    return {
+      ...r, score,
+      verdict: score >= 80 ? '强烈推荐' : score >= 65 ? '值得关注' : score >= 50 ? '观察' : '不推荐',
+    }
+  }).sort((a, b) => b.score - a.score)
+  res.json({ code: 200, data: { rows: scored, analyzed: scored.length } })
 })
 
 // ---------- 物流轨迹追踪 ----------

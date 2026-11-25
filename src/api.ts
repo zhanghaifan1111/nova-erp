@@ -122,6 +122,11 @@ export const api = {
   backupRestore: (data: any, mode?: string) => request('/backup/restore', { method: 'POST', body: JSON.stringify({ data, mode: mode || 'skip' }) }),
   systemHealth: () => request('/system/health'),
   couponValidate: (code: string, amount: number) => request('/coupon/validate', { method: 'POST', body: JSON.stringify({ code, amount }) }),
+  aiDescription: (body: any) => request('/ai/description', { method: 'POST', body: JSON.stringify(body) }),
+  aiTranslate: (text: string, from: string, to: string) => request('/ai/translate', { method: 'POST', body: JSON.stringify({ text, from, to }) }),
+  aiCompliance: (text: string, platform: string) => request('/ai/compliance', { method: 'POST', body: JSON.stringify({ text, platform }) }),
+  csAutoReply: (message: string) => request('/cs/auto-reply', { method: 'POST', body: JSON.stringify({ message }) }),
+  researchScore: (rows: any[]) => request('/research/score', { method: 'POST', body: JSON.stringify({ rows }) }),
   health: () => request('/health'),
 }
 

@@ -19,6 +19,7 @@ const { Header, Sider, Content } = Layout
 const adminMenu = [
   { key: '/', icon: <DashboardOutlined />, label: '经营总览' },
   { key: '/command-center', icon: <FundProjectionScreenOutlined />, label: '经营驾驶舱' },
+  { key: '/listing-studio', icon: <RobotOutlined />, label: 'Listing 工作台' },
   {
     key: 'grp-product', icon: <AppstoreOutlined />, label: '商品与库存',
     children: [
@@ -55,6 +56,7 @@ const adminMenu = [
       { key: '/messages', label: '客户消息聚合' },
       { key: '/ads-transfer', label: '广告 ROI · 智能调拨' },
       { key: '/tracking-sharing', label: '物流轨迹 · 库存共享' },
+      { key: '/cs-research', label: '智能客服 · 选品竞品' },
     ],
   },
   {
@@ -78,6 +80,7 @@ const adminMenu = [
       { key: '/automation', label: '自动化规则引擎' },
       { key: '/reports', label: '自定义报表' },
       { key: '/team-funnel', label: '员工绩效 · 销售漏斗' },
+      { key: '/ai-toolbox', label: 'AI 工具箱' },
     ],
   },
   { type: 'divider' as const },
@@ -132,16 +135,17 @@ const titleMap: Record<string, string> = {
   '/global-settings': '多语言 · 多币种 · 文案助手',
   '/tracking-sharing': '物流轨迹 · 库存共享', '/pricing-backup': '智能定价 · 数据备份',
   '/monitor-promo': '系统监控 · 促销优惠券',
+  '/ai-toolbox': 'AI 工具箱', '/cs-research': '智能客服 · 选品竞品', '/listing-studio': '一站式 Listing 工作台',
 }
 
 const groupKeys: Record<string, string> = {
   '/products': 'grp-product', '/sourcing': 'grp-product', '/listings': 'grp-product',
   '/inventory': 'grp-product', '/stock-flow': 'grp-product', '/warehouses': 'grp-product', '/stock-transfers': 'grp-product', '/warehouse-fx': 'grp-product', '/warehouse-intel': 'grp-product', '/quality': 'grp-product',
   '/sales': 'grp-order', '/purchase': 'grp-order', '/shipments': 'grp-order', '/labels': 'grp-order', '/order-sync': 'grp-order', '/after-sales': 'grp-order', '/rfq': 'grp-order',
-  '/shops': 'grp-cross', '/shipping-methods': 'grp-cross', '/shipping-templates': 'grp-cross', '/messages': 'grp-cross', '/ads-transfer': 'grp-cross', '/tracking-sharing': 'grp-cross',
+  '/shops': 'grp-cross', '/shipping-methods': 'grp-cross', '/shipping-templates': 'grp-cross', '/messages': 'grp-cross', '/ads-transfer': 'grp-cross', '/tracking-sharing': 'grp-cross', '/cs-research': 'grp-cross',
   '/finance': 'grp-finance', '/payments': 'grp-finance', '/profit': 'grp-finance', '/pricing': 'grp-finance', '/compliance': 'grp-finance',
   '/gl': 'grp-finance', '/reconciliation': 'grp-finance',
-  '/intelligence': 'grp-workflow', '/workflow': 'grp-workflow', '/performance': 'grp-workflow', '/automation': 'grp-workflow', '/reports': 'grp-workflow', '/team-funnel': 'grp-workflow',
+  '/intelligence': 'grp-workflow', '/workflow': 'grp-workflow', '/performance': 'grp-workflow', '/automation': 'grp-workflow', '/reports': 'grp-workflow', '/team-funnel': 'grp-workflow', '/ai-toolbox': 'grp-workflow',
   '/accounts': 'grp-account', '/customer-accounts': 'grp-account', '/profile': 'grp-account', '/rbac': 'grp-account', '/global-settings': 'grp-account', '/pricing-backup': 'grp-account', '/monitor-promo': 'grp-account',
   '/api-integration': 'grp-account', '/data-io': 'grp-account',
 }

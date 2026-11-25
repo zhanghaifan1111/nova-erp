@@ -56,6 +56,9 @@ const GlobalSettings = lazy(() => import('./pages/GlobalSettings'))
 const TrackingSharing = lazy(() => import('./pages/TrackingSharing'))
 const PricingBackup = lazy(() => import('./pages/PricingBackup'))
 const MonitorPromo = lazy(() => import('./pages/MonitorPromo'))
+const AiToolbox = lazy(() => import('./pages/AiToolbox'))
+const CsResearch = lazy(() => import('./pages/CsResearch'))
+const ListingStudio = lazy(() => import('./pages/ListingStudio'))
 
 const Loading = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>
@@ -132,6 +135,9 @@ export default function App() {
           <Route path="/tracking-sharing" element={<AdminOnly><TrackingSharing /></AdminOnly>} />
           <Route path="/pricing-backup" element={<AdminOnly><PricingBackup /></AdminOnly>} />
           <Route path="/monitor-promo" element={<AdminOnly><MonitorPromo /></AdminOnly>} />
+          <Route path="/ai-toolbox" element={<AdminOnly><AiToolbox /></AdminOnly>} />
+          <Route path="/cs-research" element={<AdminOnly><CsResearch /></AdminOnly>} />
+          <Route path="/listing-studio" element={<AdminOnly><ListingStudio /></AdminOnly>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
