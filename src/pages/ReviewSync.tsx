@@ -63,7 +63,11 @@ function AutoReview() {
         { title: '规则名', dataIndex: 'name', key: 'name' },
         { title: '条件', key: 'cond', render: (_: any, r: any) => {
           const c = r.condition || {}
-          return c.type === 'amount' ? `金额 ${c.min || 0}-${c.max || '∞'}` : `${c.type === 'keyword' ? '关键词' : '地区'} ${c.value || ''}`
+          const type = c.type || r.conditionType || ''
+          const min = c.min !== undefined ? c.min : r.min
+          const max = c.max !== undefined ? c.max : r.max
+          const val = c.value !== undefined ? c.value : r.value
+          return type === 'amount' ? `金额 ${min || 0}-${max || '∞'}` : `${type === 'keyword' ? '关键词' : type === 'region' ? '地区' : '未设'} ${val || ''}`
         } },
         { title: '动作', dataIndex: 'action', key: 'action', render: (v: string) => <Tag color={v === '自动审核' ? 'success' : v === '拦截' ? 'error' : 'default'}>{v}</Tag> },
         { title: '物流', dataIndex: 'shippingMethod', key: 'shippingMethod', render: (v: string) => v || '自动最便宜' },

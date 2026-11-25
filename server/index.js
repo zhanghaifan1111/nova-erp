@@ -524,14 +524,19 @@ app.post('/api/order-rule/evaluate', authRequired, adminRequired, async (req, re
   const total = Number(order.total || 0)
   let action = '手动处理', reason = '未命中任何规则', matched = null, shippingMethod = ''
   for (const r of rules) {
+    // 兼容两种存储：UI表单平铺字段(conditionType/min/max/value) 与 API嵌套(condition:{...})
     const c = r.condition || {}
+    const ctype = c.type || r.conditionType || ''
+    const cmin = c.min !== undefined ? c.min : r.min
+    const cmax = c.max !== undefined ? c.max : r.max
+    const cval = c.value !== undefined ? c.value : r.value
     let hit = false
-    if (c.type === 'amount') {
-      hit = total >= Number(c.min || 0) && (c.max === undefined || c.max === '' || total <= Number(c.max))
-    } else if (c.type === 'keyword') {
-      hit = String(order.customerName || '').includes(c.value || '') || (order.items || []).some((it) => String(it.name || '').includes(c.value || ''))
-    } else if (c.type === 'region') {
-      hit = String(order.region || order.customerName || '').includes(c.value || '')
+    if (ctype === 'amount') {
+      hit = total >= Number(cmin || 0) && (cmax === undefined || cmax === '' || total <= Number(cmax))
+    } else if (ctype === 'keyword') {
+      hit = String(order.customerName || '').includes(cval || '') || (order.items || []).some((it) => String(it.name || '').includes(cval || ''))
+    } else if (ctype === 'region') {
+      hit = String(order.region || order.customerName || '').includes(cval || '')
     }
     if (hit) {
       matched = r
@@ -565,8 +570,13 @@ app.post('/api/order-rule/batch', authRequired, adminRequired, async (req, res) 
     const total = Number(o.total || 0)
     const hit = rules.find((r) => {
       const c = r.condition || {}
-      if (c.type === 'amount') return total >= Number(c.min || 0) && (c.max === '' || c.max === undefined || total <= Number(c.max))
-      if (c.type === 'keyword') return String(o.customerName || '').includes(c.value || '')
+      const ctype = c.type || r.conditionType || ''
+      const cmin = c.min !== undefined ? c.min : r.min
+      const cmax = c.max !== undefined ? c.max : r.max
+      const cval = c.value !== undefined ? c.value : r.value
+      if (ctype === 'amount') return total >= Number(cmin || 0) && (cmax === '' || cmax === undefined || total <= Number(cmax))
+      if (ctype === 'keyword') return String(o.customerName || '').includes(cval || '')
+      if (ctype === 'region') return String(o.region || o.customerName || '').includes(cval || '')
       return false
     })
     if (hit?.action === '自动审核') { await store.update('salesOrders', o.id, { status: '待发货', autoReviewed: true, reviewNote: `自动审核:${hit.name}` }); autoPassed++ }
