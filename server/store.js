@@ -33,6 +33,7 @@ export const COLLECTIONS = [
   'shipments_tracking', 'stockLocks', 'coupons',
   'csRules', 'blacklist', 'products_research', 'competitors',
   'waves', 'orderRules', 'inventorySyncRules', 'scheduledListings',
+  'tenants', 'plans', 'subscriptions', 'platformAuths', 'apiKeys', 'webhooks', 'webhookLogs', 'quotaLogs',
   'users',
 ]
 const BUSINESS_COLLECTIONS = [
@@ -51,6 +52,7 @@ const BUSINESS_COLLECTIONS = [
   'shipments_tracking', 'stockLocks', 'coupons',
   'csRules', 'blacklist', 'products_research', 'competitors',
   'waves', 'orderRules', 'inventorySyncRules', 'scheduledListings',
+  'tenants', 'plans', 'subscriptions', 'platformAuths', 'apiKeys', 'webhooks', 'webhookLogs', 'quotaLogs',
 ]
 
 function emptyDb() {

@@ -8,7 +8,7 @@ import {
   BellOutlined, SettingOutlined, SafetyCertificateOutlined, UserOutlined,
   LogoutOutlined, KeyOutlined, DownOutlined, GlobalOutlined,
   FundProjectionScreenOutlined, AuditOutlined, CheckSquareOutlined,
-  RobotOutlined, CustomerServiceOutlined,
+  RobotOutlined, CustomerServiceOutlined, CrownOutlined,
 } from '@ant-design/icons'
 import { useAppTheme } from '../theme'
 import { useAuth } from '../auth'
@@ -20,6 +20,7 @@ const adminMenu = [
   { key: '/', icon: <DashboardOutlined />, label: '经营总览' },
   { key: '/command-center', icon: <FundProjectionScreenOutlined />, label: '经营驾驶舱' },
   { key: '/listing-studio', icon: <RobotOutlined />, label: 'Listing 工作台' },
+  { key: '/saas', icon: <CrownOutlined />, label: 'SaaS 运营中心' },
   {
     key: 'grp-product', icon: <AppstoreOutlined />, label: '商品与库存',
     children: [
@@ -138,7 +139,7 @@ const titleMap: Record<string, string> = {
   '/global-settings': '多语言 · 多币种 · 文案助手',
   '/tracking-sharing': '物流轨迹 · 库存共享', '/pricing-backup': '智能定价 · 数据备份',
   '/monitor-promo': '系统监控 · 促销优惠券',
-  '/ai-toolbox': 'AI 工具箱', '/cs-research': '智能客服 · 选品竞品', '/listing-studio': '一站式 Listing 工作台',
+  '/ai-toolbox': 'AI 工具箱', '/cs-research': '智能客服 · 选品竞品', '/listing-studio': '一站式 Listing 工作台', '/saas': 'SaaS 运营中心',
   '/migration-waves': '产品搬家 · 波次发货', '/review-sync': '自动审单 · 库存同步', '/image-schedule': '在线美图 · 定时刊登',
 }
 

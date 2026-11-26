@@ -1,10 +1,12 @@
 import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth'
 import { Button, Input, Checkbox, message, Spin } from 'antd'
 import { UserOutlined, LockOutlined } from '@ant-design/icons'
 
 export default function Login() {
   const { login } = useAuth()
+  const navigate = useNavigate()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -67,6 +69,9 @@ export default function Login() {
         <Button type="primary" size="large" block loading={loading} onClick={submit} className="login-btn">
           登 录
         </Button>
+        <div style={{ textAlign: 'center', marginTop: 16 }}>
+          <Button type="link" onClick={() => navigate('/register')}>还没有账号？免费开通 ERP →</Button>
+        </div>
       </div>
     </div>
   )

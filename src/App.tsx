@@ -62,6 +62,8 @@ const ListingStudio = lazy(() => import('./pages/ListingStudio'))
 const MigrationWaves = lazy(() => import('./pages/MigrationWaves'))
 const ReviewSync = lazy(() => import('./pages/ReviewSync'))
 const ImageSchedule = lazy(() => import('./pages/ImageSchedule'))
+const Register = lazy(() => import('./pages/Register'))
+const SaasCenter = lazy(() => import('./pages/SaasCenter'))
 
 const Loading = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}><Spin size="large" /></div>
@@ -86,6 +88,7 @@ export default function App() {
     <Suspense fallback={<Loading />}>
       <Routes>
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+        <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
         <Route element={<RequireAuth><MainLayout /></RequireAuth>}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/sales" element={<Sales />} />
@@ -144,6 +147,7 @@ export default function App() {
           <Route path="/migration-waves" element={<AdminOnly><MigrationWaves /></AdminOnly>} />
           <Route path="/review-sync" element={<AdminOnly><ReviewSync /></AdminOnly>} />
           <Route path="/image-schedule" element={<AdminOnly><ImageSchedule /></AdminOnly>} />
+          <Route path="/saas" element={<SaasCenter />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

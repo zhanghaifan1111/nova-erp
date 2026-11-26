@@ -134,6 +134,13 @@ export const api = {
   orderRuleBatch: () => request('/order-rule/batch', { method: 'POST' }),
   inventorySyncApply: (ruleId: string) => request('/inventory-sync/apply', { method: 'POST', body: JSON.stringify({ ruleId }) }),
   scheduleProcess: () => request('/schedule/process'),
+  saasMe: () => request('/saas/me'),
+  saasRegister: (body: any) => request('/saas/register', { method: 'POST', body: JSON.stringify(body) }),
+  saasSubscribe: (plan: string) => request('/saas/subscribe', { method: 'POST', body: JSON.stringify({ plan }) }),
+  createApiKey: (name: string) => request('/saas/apikey', { method: 'POST', body: JSON.stringify({ name }) }),
+  platformAuthTest: (body: any) => request('/platform-auth/test', { method: 'POST', body: JSON.stringify(body) }),
+  createWebhook: (body: any) => request('/saas/webhook', { method: 'POST', body: JSON.stringify(body) }),
+  webhookTest: (id: string) => request('/saas/webhook/test/' + id, { method: 'POST' }),
   health: () => request('/health'),
 }
 

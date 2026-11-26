@@ -44,7 +44,7 @@ app.post('/api/admin/clear-business-data', authRequired, adminRequired, async (r
 
 // ---------- 鉴权中间件 ----------
 function signToken(user) {
-  return jwt.sign({ id: user.id, username: user.username, role: user.role, roleKey: user.roleKey, customerId: user.customerId || null, name: user.name }, JWT_SECRET, { expiresIn: '7d' })
+  return jwt.sign({ id: user.id, username: user.username, role: user.role, roleKey: user.roleKey, customerId: user.customerId || null, tenantId: user.tenantId || null, name: user.name }, JWT_SECRET, { expiresIn: '7d' })
 }
 
 function authRequired(req, res, next) {
@@ -153,6 +153,169 @@ app.get('/api/customer-accounts', authRequired, adminRequired, async (req, res) 
   res.json({ code: 200, data: rows, total: rows.length })
 })
 
+// ---------- SaaS：订阅套餐定义 ----------
+const PLAN_DEFS = {
+  free: { key: 'free', name: '免费版', price: 0, limits: { products: 50, orders: 100, users: 1, apiCalls: 100 } },
+  pro: { key: 'pro', name: '专业版', price: 199, limits: { products: 2000, orders: 10000, users: 5, apiCalls: 10000 } },
+  flagship: { key: 'flagship', name: '旗舰版', price: 599, limits: { products: 100000, orders: 1000000, users: 50, apiCalls: 1000000 } },
+}
+
+// 初始化套餐（幂等）
+async function ensurePlans() {
+  for (const p of Object.values(PLAN_DEFS)) {
+    if (!(await store.findBy('plans', 'key', p.key))) await store.create('plans', p)
+  }
+}
+ensurePlans()
+
+// 租户注册：创建租户+管理员账号+免费订阅
+app.post('/api/saas/register', async (req, res) => {
+  const { company, username, password, plan } = req.body || {}
+  if (!company || !username || !password) return res.status(400).json({ code: 400, message: '公司名/账号/密码必填' })
+  if (String(password).length < 6) return res.status(400).json({ code: 400, message: '密码至少6位' })
+  if (await store.findBy('users', 'username', String(username).trim())) return res.status(400).json({ code: 400, message: '账号已存在' })
+  const planKey = PLAN_DEFS[plan] ? plan : 'free'
+  const tenant = await store.create('tenants', {
+    name: String(company).trim(),
+    code: 'T' + Date.now().toString().slice(-8),
+    status: '启用',
+    createdAt: new Date().toISOString().slice(0, 10),
+  })
+  await store.create('users', {
+    username: String(username).trim(),
+    passwordHash: bcrypt.hashSync(String(password), 10),
+    name: String(username).trim(),
+    role: 'admin',
+    roleKey: 'tenant_admin',
+    tenantId: tenant.id,
+    status: '启用',
+  })
+  await store.create('subscriptions', {
+    tenantId: tenant.id,
+    plan: planKey,
+    status: '生效',
+    startDate: new Date().toISOString().slice(0, 10),
+    expiryDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+  })
+  res.json({ code: 200, message: `租户「${company}」已创建，免费版试用30天`, data: { tenant, plan: planKey } })
+})
+
+// 当前租户信息 + 套餐额度
+app.get('/api/saas/me', authRequired, async (req, res) => {
+  const tid = req.user?.tenantId
+  if (!tid) return res.json({ code: 200, data: { isPlatformAdmin: true, plan: 'flagship', limits: PLAN_DEFS.flagship.limits } })
+  const tenant = await store.find('tenants', tid)
+  const sub = (await store.all('subscriptions')).find((s) => s.tenantId === tid && s.status === '生效')
+  const planKey = sub?.plan || 'free'
+  const plan = PLAN_DEFS[planKey] || PLAN_DEFS.free
+  const [products, sales, users] = await Promise.all([store.all('products'), store.all('salesOrders'), store.all('users')])
+  const usage = {
+    products: products.filter((p) => p.tenantId === tid).length,
+    orders: sales.filter((o) => o.tenantId === tid).length,
+    users: users.filter((u) => u.tenantId === tid).length,
+  }
+  res.json({ code: 200, data: { isPlatformAdmin: false, tenant, subscription: sub, plan: planKey, planName: plan.name, limits: plan.limits, usage } })
+})
+
+// 升级套餐
+app.post('/api/saas/subscribe', authRequired, async (req, res) => {
+  const tid = req.user?.tenantId
+  if (!tid) return res.status(403).json({ code: 403, message: '平台管理员无需订阅' })
+  const { plan } = req.body || {}
+  if (!PLAN_DEFS[plan]) return res.status(400).json({ code: 400, message: '套餐不存在' })
+  const subs = await store.all('subscriptions')
+  const current = subs.find((s) => s.tenantId === tid && s.status === '生效')
+  if (current) await store.update('subscriptions', current.id, { status: '已过期', endedAt: new Date().toISOString().slice(0, 10) })
+  const sub = await store.create('subscriptions', {
+    tenantId: tid, plan, status: '生效',
+    startDate: new Date().toISOString().slice(0, 10),
+    expiryDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+  })
+  res.json({ code: 200, message: `已升级到「${PLAN_DEFS[plan].name}」`, data: sub })
+})
+
+// 额度校验中间件（用于写操作）
+async function checkQuota(req, key) {
+  const tid = req.user?.tenantId
+  if (!tid) return true
+  const sub = (await store.all('subscriptions')).find((s) => s.tenantId === tid && s.status === '生效')
+  const limits = (PLAN_DEFS[sub?.plan] || PLAN_DEFS.free).limits
+  const metric = key === 'products' ? 'products' : key === 'salesOrders' ? 'orders' : null
+  if (!metric) return true
+  const used = (await store.all(key)).filter((r) => r.tenantId === tid).length
+  return used < limits[metric]
+}
+
+// ---------- 平台授权中心 ----------
+// 授权记录（真实 OAuth 需要各平台 App Key/Secret，这里建框架+模拟连通）
+app.post('/api/platform-auth/test', authRequired, async (req, res) => {
+  const tid = req.user?.tenantId || 'platform'
+  const { platform, shopName, appKey, appSecret, accessToken } = req.body || {}
+  if (!platform || !shopName) return res.status(400).json({ code: 400, message: '平台和店铺名必填' })
+  // 真实对接时用 appKey/appSecret 走各平台 OAuth；这里做凭据完整性检查
+  const hasCredential = !!(accessToken || (appKey && appSecret))
+  const auth = await store.create('platformAuths', {
+    tenantId: tid, platform, shopName,
+    appKey: appKey || '', appSecret: appSecret ? '***' + String(appSecret).slice(-4) : '',
+    hasToken: !!accessToken,
+    status: hasCredential ? '已授权' : '待授权',
+    lastTest: new Date().toISOString().slice(0, 10),
+  })
+  res.json({
+    code: 200,
+    data: auth,
+    message: hasCredential ? '授权信息已保存（凭据完整）' : '授权信息已保存，请补充 Token 或 App Key/Secret 后才能真正拉取数据',
+  })
+})
+
+// ---------- 开放 API：API Key ----------
+app.post('/api/saas/apikey', authRequired, async (req, res) => {
+  const tid = req.user?.tenantId
+  if (!tid) return res.status(403).json({ code: 403, message: '平台管理员不适用' })
+  const { name } = req.body || {}
+  const key = 'nva_' + crypto.randomBytes(16).toString('hex')
+  const rec = await store.create('apiKeys', { tenantId: tid, name: name || '默认密钥', key, status: '启用', createdAt: new Date().toISOString().slice(0, 10), calls: 0 })
+  res.json({ code: 200, message: 'API Key 已生成，请妥善保存', data: rec })
+})
+
+// API Key 鉴权（供外部系统调用）
+app.use('/api/open', async (req, res, next) => {
+  const key = req.headers['x-api-key'] || req.query.apiKey
+  const rec = (await store.all('apiKeys')).find((k) => k.key === key && k.status === '启用')
+  if (!rec) return res.status(401).json({ code: 401, message: 'API Key 无效或已停用' })
+  req.apiTenantId = rec.tenantId
+  req.apiKeyId = rec.id
+  await store.update('apiKeys', rec.id, { calls: Number(rec.calls || 0) + 1, lastUsed: new Date().toISOString() })
+  next()
+})
+
+app.get('/api/open/products', async (req, res) => {
+  const rows = (await store.all('products')).filter((p) => p.tenantId === req.apiTenantId)
+  res.json({ code: 200, data: rows, total: rows.length })
+})
+app.get('/api/open/orders', async (req, res) => {
+  const rows = (await store.all('salesOrders')).filter((o) => o.tenantId === req.apiTenantId)
+  res.json({ code: 200, data: rows, total: rows.length })
+})
+
+// ---------- Webhook ----------
+app.post('/api/saas/webhook', authRequired, async (req, res) => {
+  const tid = req.user?.tenantId || 'platform'
+  const { url, events } = req.body || {}
+  if (!url) return res.status(400).json({ code: 400, message: '请填写推送地址' })
+  const rec = await store.create('webhooks', { tenantId: tid, url, events: events || ['订单创建'], status: '启用', createdAt: new Date().toISOString().slice(0, 10) })
+  res.json({ code: 200, message: 'Webhook 已订阅', data: rec })
+})
+
+// 手动触发测试推送（记录日志；真实 HTTP 推送在生产环境发出）
+app.post('/api/saas/webhook/test/:id', authRequired, async (req, res) => {
+  const wh = await store.find('webhooks', req.params.id)
+  if (!wh) return res.status(404).json({ code: 404, message: 'Webhook 不存在' })
+  const payload = { event: '测试事件', data: { message: '这是一条来自 ERP 的测试推送' }, timestamp: new Date().toISOString() }
+  const log = await store.create('webhookLogs', { tenantId: wh.tenantId, webhookId: wh.id, url: wh.url, payload, status: '已模拟推送', at: new Date().toISOString() })
+  res.json({ code: 200, message: '测试推送已记录', data: log })
+})
+
 // ---------- 操作审计：记录所有写操作 ----------
 app.use('/api', async (req, res, next) => {
   if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
@@ -194,9 +357,17 @@ const COLLECTIONS = [
   'shipments_tracking', 'stockLocks', 'coupons',
   'csRules', 'blacklist', 'products_research', 'competitors',
   'waves', 'orderRules', 'inventorySyncRules', 'scheduledListings',
+  'tenants', 'plans', 'subscriptions', 'platformAuths', 'apiKeys', 'webhooks', 'webhookLogs', 'quotaLogs',
 ]
 
+const TENANT_META_KEYS = ['tenants', 'plans', 'subscriptions', 'users', 'apiKeys', 'webhooks', 'webhookLogs', 'quotaLogs']
 function scopeRows(req, key, rows) {
+  const tid = req.user?.tenantId
+  // 租户数据隔离：带 tenantId 的用户（含租户管理员）只能看自己租户的数据
+  // 老 admin（tenantId 为空）保持兼容，看全部
+  if (tid && !TENANT_META_KEYS.includes(key)) {
+    return rows.filter((r) => r.tenantId === tid)
+  }
   if (req.user?.role === 'admin') return rows
   if (key === 'salesOrders') return rows.filter((o) => o.customerId === req.user.customerId)
   if (key === 'customers') return rows.filter((c) => c.id === req.user.customerId)
@@ -227,16 +398,30 @@ for (const key of COLLECTIONS) {
     : res.status(403).json({ code: 403, message: '客户账号为只读权限' })
 
   app.post(`/api/${key}`, authRequired, writeGuard, async (req, res) => {
-    const rec = await store.create(key, req.body)
+    // 套餐配额：租户创建商品/订单时校验上限
+    if (['products', 'salesOrders'].includes(key) && !(await checkQuota(req, key))) {
+      return res.status(403).json({ code: 403, message: '已达到套餐用量上限，请升级套餐' })
+    }
+    const body = { ...req.body }
+    if (req.user?.tenantId && !TENANT_META_KEYS.includes(key)) body.tenantId = req.user.tenantId
+    const rec = await store.create(key, body)
     res.json({ code: 200, data: rec, message: '创建成功' })
   })
 
   app.put(`/api/${key}/:id`, authRequired, writeGuard, async (req, res) => {
+    const existing = await store.find(key, req.params.id)
+    if (req.user?.tenantId && !TENANT_META_KEYS.includes(key) && existing?.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ code: 403, message: '无权修改其他租户的数据' })
+    }
     const rec = await store.update(key, req.params.id, req.body)
     rec ? res.json({ code: 200, data: rec, message: '更新成功' }) : res.status(404).json({ code: 404, message: '记录不存在' })
   })
 
   app.delete(`/api/${key}/:id`, authRequired, writeGuard, async (req, res) => {
+    const existing = await store.find(key, req.params.id)
+    if (req.user?.tenantId && !TENANT_META_KEYS.includes(key) && existing?.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ code: 403, message: '无权删除其他租户的数据' })
+    }
     const ok = await store.remove(key, req.params.id)
     ok ? res.json({ code: 200, message: '删除成功' }) : res.status(404).json({ code: 404, message: '记录不存在' })
   })
