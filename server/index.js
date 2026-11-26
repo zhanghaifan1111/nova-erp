@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import * as store from './store.js'
+import { tenantCtx } from './tenantContext.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -53,7 +54,8 @@ function authRequired(req, res, next) {
   if (!token) return res.status(401).json({ code: 401, message: '请先登录' })
   try {
     req.user = jwt.verify(token, JWT_SECRET)
-    next()
+    // 把当前租户放进 AsyncLocalStorage，后续所有 store.all/find 自动按租户隔离
+    tenantCtx.run({ tenantId: req.user.tenantId, role: req.user.role, userId: req.user.id }, () => next())
   } catch {
     return res.status(401).json({ code: 401, message: '登录已过期，请重新登录' })
   }

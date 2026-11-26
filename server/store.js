@@ -121,14 +121,29 @@ export async function clearBusinessData() {
   return counts
 }
 
+import { getTenantFilter, belongsToTenant, TENANT_META_KEYS } from './tenantContext.js'
+
+// 按当前请求租户自动过滤。非请求上下文（初始化/定时任务）tenantId=null → 看全部。
+function scoped(key, rows) {
+  if (TENANT_META_KEYS.has(key)) return rows
+  const tid = getTenantFilter()
+  if (!tid) return rows
+  return rows.filter((r) => belongsToTenant(r, tid))
+}
+
 export async function all(key) {
-  if (useMongo) return mongoDb.collection(key).find({}, { projection: { _id: 0 } }).toArray()
-  return memoryDb[key] || []
+  let rows
+  if (useMongo) rows = await mongoDb.collection(key).find({}, { projection: { _id: 0 } }).toArray()
+  else rows = memoryDb[key] || []
+  return scoped(key, rows)
 }
 
 export async function find(key, id) {
-  if (useMongo) return mongoDb.collection(key).findOne({ id }, { projection: { _id: 0 } })
-  return (memoryDb[key] || []).find((r) => r.id === id)
+  let row
+  if (useMongo) row = await mongoDb.collection(key).findOne({ id }, { projection: { _id: 0 } })
+  else row = (memoryDb[key] || []).find((r) => r.id === id)
+  if (!row || TENANT_META_KEYS.has(key)) return row || null
+  return belongsToTenant(row, getTenantFilter()) ? row : null
 }
 
 export async function findBy(key, field, value) {
@@ -137,7 +152,9 @@ export async function findBy(key, field, value) {
 }
 
 export async function create(key, record) {
-  const rec = { id: uid(key[0]), ...record, createdAt: record.createdAt || today() }
+  const tid = TENANT_META_KEYS.has(key) ? null : getTenantFilter()
+  // 租户上下文里创建业务数据时自动打租户标记，确保数据归属正确
+  const rec = { id: uid(key[0]), ...record, ...(tid && !record.tenantId ? { tenantId: tid } : {}), createdAt: record.createdAt || today() }
   if (useMongo) { await mongoDb.collection(key).insertOne(rec); return rec }
   memoryDb[key] = memoryDb[key] || []
   memoryDb[key].unshift(rec)
@@ -146,20 +163,32 @@ export async function create(key, record) {
 }
 
 export async function update(key, id, patch) {
+  const tid = TENANT_META_KEYS.has(key) ? null : getTenantFilter()
+  if (tid) {
+    const owner = (memoryDb[key] || []).find((r) => r.id === id)
+    if (owner && !belongsToTenant(owner, tid)) return null // 跨租户写拒绝
+  }
   if (useMongo) {
-    await mongoDb.collection(key).updateOne({ id }, { $set: patch })
+    const filter = tid ? { id, tenantId: tid } : { id }
+    await mongoDb.collection(key).updateOne(filter, { $set: patch })
     return mongoDb.collection(key).findOne({ id }, { projection: { _id: 0 } })
   }
   const rec = (memoryDb[key] || []).find((r) => r.id === id)
-  if (!rec) return null
+  if (!rec || (tid && !belongsToTenant(rec, tid))) return null
   Object.assign(rec, patch)
   persistFile()
   return rec
 }
 
 export async function remove(key, id) {
-  if (useMongo) { const r = await mongoDb.collection(key).deleteOne({ id }); return r.deletedCount > 0 }
-  if (!(memoryDb[key] || []).some((r) => r.id === id)) return false
+  const tid = TENANT_META_KEYS.has(key) ? null : getTenantFilter()
+  if (useMongo) {
+    const filter = tid ? { id, tenantId: tid } : { id }
+    const r = await mongoDb.collection(key).deleteOne(filter)
+    return r.deletedCount > 0
+  }
+  const rec = (memoryDb[key] || []).find((r) => r.id === id)
+  if (!rec || (tid && !belongsToTenant(rec, tid))) return false
   memoryDb[key] = memoryDb[key].filter((r) => r.id !== id)
   persistFile()
   return true
